@@ -6,6 +6,8 @@ use async_msg::AsyncMsg;
 
 mod async_ble;
 
+mod sync_gui;
+
 use std::time::{Duration, Instant};
 
 // [egui] <--async_bridge--> [btleplug]
@@ -16,6 +18,14 @@ fn main() {
 
     // make our async bridge
     let mut ts = AsyncBridge::new();
+
+    // make + send msg
+    let m = AsyncMsg::MsgVersion {
+        major: 1,
+        minor: 2,
+        patch: 3,
+    };
+    ts.send_to_async(m);
 
     // make + send msg
     let m = AsyncMsg::ScanStart {

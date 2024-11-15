@@ -36,16 +36,20 @@ pub async fn ble_transport_task(out_send: Sender<AsyncMsg>, mut in_recv: Receive
     loop {
         match in_recv.recv().await {
             None => {}
-            Some(msg) => {
-                println!("async_ble got {msg:?}");
+            Some(AsyncMsg::ScanStart { filter, duration }) => {
+                // ) { filter, duration }) => {
+                println!("async_ble got ScanStart{{filter: {filter}, duration: {duration}}}");
                 let response = AsyncMsg::ScanResult {
                     result: ResultSuccess,
                     periphs: vec![],
                 };
                 match out_send.send(response).await {
                     Ok(_good) => (),
-                    Err(bad) => eprintln!("handle_task can't reply: {bad}"),
+                    Err(bad) => eprintln!("ble_transport_task can't reply: {bad}"),
                 }
+            }
+            Some(unhandled) => {
+                println!("async_ble got (UNHANDLED): {unhandled:?}");
             }
         }
     }
