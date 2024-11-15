@@ -1,19 +1,28 @@
 mod async_bridge;
-use async_bridge::{Task, TaskBridge};
+use async_bridge::AsyncBridge;
+
+mod async_msg;
+use async_msg::AsyncMsg;
+
+mod async_ble;
 
 use std::time::{Duration, Instant};
 
 // [egui] <--async_bridge--> [btleplug]
 
 fn main() {
-    println!("Hello, world!");
+    // TODO: replace test logic w/ gui.rs
+    //       i.e. - put async_bridge logic, etc.
 
     // make our async bridge
-    let mut ts = TaskBridge::new();
+    let mut ts = AsyncBridge::new();
 
-    let t = Task::new("yolo".into());
-    // use our async bridge - would be used from egui context
-    ts.send_to_async(t);
+    // make + send msg
+    let m = AsyncMsg::ScanStart {
+        filter: "".into(),
+        duration: 5.0 as f32,
+    };
+    ts.send_to_async(m);
 
     let start = Instant::now();
     loop {

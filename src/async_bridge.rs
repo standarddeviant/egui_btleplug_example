@@ -1,36 +1,40 @@
 use tokio::runtime::Builder;
 use tokio::sync::mpsc;
 
-#[derive(Debug)]
-pub struct Task {
-    name: String,
-    // info that describes the task
-}
+use crate::async_msg::AsyncMsg;
 
-impl Task {
-    pub fn new(name: String) -> Task {
-        Self { name }
-    }
-}
+use crate::async_ble::ble_transport_task;
 
-async fn handle_task(task: Task, out_send: mpsc::Sender<Task>) {
-    println!("Got task {}", task.name);
+// #[derive(Debug)]
+// pub struct AsyncMsg {
+//     name: String,
+//     // info that describes the task
+// }
 
-    let response = Task::new(format!("Response from {}", task.name));
-    match out_send.send(response).await {
-        Ok(_good) => (),
-        Err(bad) => eprintln!("handle_task can't reply: {bad}"),
-    }
-}
+// impl AsyncMsg {
+//     pub fn new(name: String) -> AsyncMsg {
+//         Self { name }
+//     }
+// }
+
+// async fn handle_task(msg: AsyncMsg, out_send: mpsc::Sender<AsyncMsg>) {
+//     println!("Got msg {:?}", msg);
+//
+//     // let response = AsyncMsg::new(format!("Response from {}", task.name));
+//     // match out_send.send(response).await {
+//     //     Ok(_good) => (),
+//     //     Err(bad) => eprintln!("handle_task can't reply: {bad}"),
+//     // }
+// }
 
 // #[derive(Clone)]
-pub struct TaskBridge {
-    to_async: mpsc::Sender<Task>,
-    from_async: mpsc::Receiver<Task>,
+pub struct AsyncBridge {
+    to_async: mpsc::Sender<AsyncMsg>,
+    from_async: mpsc::Receiver<AsyncMsg>,
 }
 
-impl TaskBridge {
-    pub fn new() -> TaskBridge {
+impl AsyncBridge {
+    pub fn new() -> AsyncBridge {
         // Set up a channel for communicating.
         let (in_send, mut in_recv) = mpsc::channel(16);
         let (out_send, out_recv) = mpsc::channel(16);
@@ -43,32 +47,27 @@ impl TaskBridge {
         let rt = Builder::new_current_thread().enable_all().build().unwrap();
 
         std::thread::spawn(move || {
+            //
             rt.block_on(async move {
-                while let Some(task) = in_recv.recv().await {
-                    tokio::spawn(handle_task(task, out_send.clone()));
-                }
-
-                // Once all senders have gone out of scope,
-                // the `.recv()` call returns None and it will
-                // exit from the while loop and shut down the
-                // thread.
+                ble_transport_task(out_send, in_recv).await;
             });
+            // }
         });
 
-        TaskBridge {
+        AsyncBridge {
             to_async: in_send,
             from_async: out_recv,
         }
     }
 
-    pub fn send_to_async(&self, task: Task) {
+    pub fn send_to_async(&self, task: AsyncMsg) {
         match self.to_async.blocking_send(task) {
             Ok(()) => {}
             Err(_) => panic!("The shared runtime has shut down."),
         }
     }
 
-    pub fn try_recv_from_async(&mut self) -> Option<Task> {
+    pub fn try_recv_from_async(&mut self) -> Option<AsyncMsg> {
         match self.from_async.try_recv() {
             Ok(good) => Some(good),
             Err(_bad) => None,
