@@ -7,12 +7,37 @@ use async_msg::AsyncMsg;
 mod async_ble;
 
 mod sync_gui;
+use sync_gui::GuiApp;
 
 use std::time::{Duration, Instant};
 
-// [egui] <--async_bridge--> [btleplug]
+// sync_gui: {app: egui, async_bridge: ...}
+// sync_gui: {app: egui, async_bridge: ...}
+
+// data_flow: {[egui] <--async_bridge--> [btleplug]
 
 fn main() {
+    let native_options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([400.0, 300.0])
+            .with_min_inner_size([300.0, 220.0])
+            .with_icon(
+                // NOTE: Adding an icon is optional
+                eframe::icon_data::from_png_bytes(&include_bytes!("../assets/icon-256.png")[..])
+                    .expect("Failed to load icon"),
+            ),
+        ..Default::default()
+    };
+    let eframe_result = eframe::run_native(
+        "eframe template",
+        native_options,
+        Box::new(|cc| {
+            Ok(Box::new(GuiApp::new(cc))) // creation context
+        }),
+    );
+}
+
+fn test_old_main() {
     // TODO: replace test logic w/ gui.rs
     //       i.e. - put async_bridge logic, etc.
 

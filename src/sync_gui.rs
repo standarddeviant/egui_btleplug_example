@@ -1,4 +1,12 @@
+use crate::async_msg::AsyncMsg;
+use crate::async_msg::GenericResult::*;
+
+use crate::async_bridge::AsyncBridge;
+
+use eframe;
+// use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
+use tokio::sync::mpsc::Sender;
 
 enum BLEState {
     Disconnected,
@@ -21,10 +29,6 @@ enum BLEState {
 // , ProbleOneof
 // use crate::msg::ProbleMessage;
 
-use crate::msg::ProbleMsg;
-
-use tokio::runtime::{Builder, Runtime};
-
 // use proble::messages::ProbleMessage;
 // use chrono::Instant;
 // use tokio::sync::mpsc::{channel, Sender, Receiver};
@@ -35,12 +39,12 @@ use tokio::runtime::{Builder, Runtime};
 
 // use crate::messages;
 
-enum BLEState {
-    Disconnected,
-    Scanning,
-    Connecting,
-    Connected,
-}
+// enum BLEState {
+//     Disconnected,
+//     Scanning,
+//     Connecting,
+//     Connected,
+// }
 
 // fn foo() -> anyhow::Result<()> {
 //     if errored {
@@ -60,10 +64,10 @@ enum BLEState {
 
 // We derive Deserialize/Serialize so we can persist app state on shutdown.
 
-#[derive(serde::Deserialize, serde::Serialize)]
-#[serde(default)] // if we add new fields, give them default values when deserializing old state
-pub struct ProbleApp {
-    #[serde(skip)] // This how you opt-out of serialization of a field
+// #[derive(serde::Deserialize, serde::Serialize)]
+// #[serde(default)] // if we add new fields, give them default values when deserializing old state
+pub struct GuiApp {
+    // #[serde(skip)] // This how you opt-out of serialization of a field
     ble_state: BLEState,
 
     // Example stuff:
@@ -72,49 +76,50 @@ pub struct ProbleApp {
     // Example stuff:
     last_name: String,
 
-    #[serde(skip)] // This how you opt-out of serialization of a field
+    // #[serde(skip)] // This how you opt-out of serialization of a field
     pstrings: Vec<String>,
 
     // let (to_dev_tx, to_dev_rx) = tokio::sync::mpsc::new(32);
     // let (from_dev_tx, from_dev_rx) = tokio::sync::mpsc::new(32);
-    #[serde(skip)] // This how you opt-out of serialization of a field
-    to_ble_send: tokio::sync::mpsc::Sender<ProbleMsg>,
-    #[serde(skip)] // This how you opt-out of serialization of a field
-    to_app_recv: tokio::sync::mpsc::Receiver<ProbleMsg>,
+    // #[serde(skip)] // This how you opt-out of serialization of a field
+    // to_ble_send: tokio::sync::mpsc::Sender<AsyncMsg>,
+    // // #[serde(skip)] // This how you opt-out of serialization of a field
+    // to_app_recv: tokio::sync::mpsc::Receiver<AsyncMsg>,
 
-    #[serde(skip)] // This how you opt-out of serialization of a field
-    scan_start: Instant,
+    // #[serde(skip)] // This how you opt-out of serialization of a field
+    scan_start_time: Instant,
 
     scan_duration: Duration,
     // #[serde(skip)] // This how you opt-out of serialization of a field
     // rt_handle: tokio::runtime::Handle,
+    bridge: AsyncBridge,
 }
 
-impl Default for ProbleApp {
-    fn default() -> Self {
-        let (junk_send, junk_recv) = tokio::sync::mpsc::channel(32);
-        let junk_rt = tokio::runtime::Runtime::new().unwrap();
-        let junk_rt_handle = junk_rt.handle();
-
-        // let (_, junk_recv) = std::sync::mpsc::channel();
-        Self {
-            // Example stuff:
-            ble_state: BLEState::Disconnected,
-            last_address: "".to_owned(),
-            last_name: "".to_owned(),
-            pstrings: [].into(),
-            to_ble_send: junk_send,
-            to_app_recv: junk_recv,
-            scan_start: Instant::now(),
-            scan_duration: Duration::from_secs_f32(0.0 as f32),
-            // rt_handle: junk_rt_handle.clone(),
-        }
-    }
-}
+// impl Default for ProbleApp {
+//     fn default() -> Self {
+//         let (junk_send, junk_recv) = tokio::sync::mpsc::channel(32);
+//         let junk_rt = tokio::runtime::Runtime::new().unwrap();
+//         let junk_rt_handle = junk_rt.handle();
+//
+//         // let (_, junk_recv) = std::sync::mpsc::channel();
+//         Self {
+//             // Example stuff:
+//             ble_state: BLEState::Disconnected,
+//             last_address: "".to_owned(),
+//             last_name: "".to_owned(),
+//             pstrings: [].into(),
+//             to_ble_send: junk_send,
+//             to_app_recv: junk_recv,
+//             scan_start: Instant::now(),
+//             scan_duration: Duration::from_secs_f32(0.0 as f32),
+//             // rt_handle: junk_rt_handle.clone(),
+//         }
+//     }
+// }
 
 async fn test_transport_fn(
-    to_app_send: tokio::sync::mpsc::Sender<ProbleMsg>,
-    mut to_ble_recv: tokio::sync::mpsc::Receiver<ProbleMsg>,
+    to_app_send: tokio::sync::mpsc::Sender<AsyncMsg>,
+    mut to_ble_recv: tokio::sync::mpsc::Receiver<AsyncMsg>,
 ) {
     // recv_from_app
     // info!("DBG: info test!");
@@ -131,8 +136,8 @@ async fn test_transport_fn(
         }
     }
 
-    let sr = ProbleMsg::ScanResult {
-        result: crate::msg::GenericResult::ResultSuccess.into(),
+    let sr = AsyncMsg::ScanResult {
+        result: ResultSuccess.into(),
         periphs: vec![],
     };
     println!("\nDBG: test_transport_fn: made msg: {sr:#?}");
@@ -148,7 +153,7 @@ async fn test_transport_fn(
     }
 }
 
-impl ProbleApp {
+impl GuiApp {
     /// Called once before the first frame.
     pub fn new(
         cc: &eframe::CreationContext<'_>,
@@ -161,44 +166,43 @@ impl ProbleApp {
         // Load previous app state (if any).
         // Note that you must enable the `persistence` feature for this to work.
 
-        let (to_ble_send, to_ble_recv) = tokio::sync::mpsc::channel(32);
-        let (to_app_send, to_app_recv) = tokio::sync::mpsc::channel(32);
+        // let (to_ble_send, to_ble_recv) = tokio::sync::mpsc::channel(32);
+        // let (to_app_send, to_app_recv) = tokio::sync::mpsc::channel(32);
 
-        if let Some(storage) = cc.storage {
-            return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
-        }
+        // if let Some(storage) = cc.storage {
+        //     return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
+        // }
 
         // spawn a tokio runtime/btleplug task
-        std::thread::spawn(move || {
-            let rt: Runtime = Builder::new_current_thread().enable_all().build().unwrap();
-            rt.block_on(async move {
-                test_transport_fn(to_app_send, to_ble_recv).await;
-            });
-        });
+        // std::thread::spawn(move || {
+        //     let rt: Runtime = Builder::new_current_thread().enable_all().build().unwrap();
+        //     rt.block_on(async move {
+        //         test_transport_fn(to_app_send, to_ble_recv).await;
+        //     });
+        // });
 
         // let (junk_send, _) = tokio::sync::mpsc::channel(32);
         // let (_, junk_recv) = std::sync::mpsc::channel();
 
         // Default::default()
-        ProbleApp {
+        GuiApp {
             ble_state: BLEState::Disconnected,
             last_address: "".into(),
             last_name: "".into(),
             pstrings: vec![],
-            to_ble_send,
-            to_app_recv,
-            scan_start: Instant::now(),
+            scan_start_time: Instant::now(),
             scan_duration: Duration::from_secs_f32(5.0),
+            bridge: AsyncBridge::new(),
             // rt_handle: rt.handle().clone(),
         }
     }
 }
 
-impl eframe::App for ProbleApp {
+impl eframe::App for GuiApp {
     /// Called by the frame work to save state before shutdown.
-    fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        eframe::set_value(storage, eframe::APP_KEY, self);
-    }
+    // fn save(&mut self, storage: &mut dyn eframe::Storage) {
+    //     eframe::set_value(storage, eframe::APP_KEY, self);
+    // }
 
     /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -234,36 +238,37 @@ impl eframe::App for ProbleApp {
                 BLEState::Disconnected => {
                     if ui.button("Start Scan").clicked() {
                         self.ble_state = BLEState::Scanning;
-                        self.scan_start = Instant::now();
-                        // NOTE: this could be cleaner, but using the protobuf types preserve
-                        // flexibility for connecting BLE logic with other frontends or libraries
-                        // in the future
-                        let m = ProbleMsg::ScanStart {
+                        self.scan_start_time = Instant::now();
+
+                        self.bridge.send_to_async(AsyncMsg::ScanStart {
                             filter: "".into(),
                             duration: 5.0,
-                        };
-                        match self.to_ble_send.blocking_send(m.clone()) {
-                            Ok(_good) => {
-                                println!("DBG: SUCCESS: to_ble_send.blocking_send(m)");
-                                println!("DBG: m = {m:?}");
-                            }
-                            Err(_bad) => {
-                                eprintln!("app: can't to_ble_send: {_bad}")
-                            }
-                        }
+                        });
                     }
                 }
                 BLEState::Scanning => {
                     // let since = Instant::now() - self.scan_start;
                     ui.label(format!("Scanning...")); // time is {:#?} seconds", since as u32));
 
-                    match self.to_app_recv.try_recv() {
-                        Ok(m) => {
-                            // TODO: is it scan result???
-                            println!("to_app_recv: got {m:?}");
+                    match self.bridge.try_recv_from_async() {
+                        Some(AsyncMsg::ScanResult { result, periphs }) => {
+                            println!("sync_gui: got ScanResult ({result:?})");
+                            println!("    {periphs:?}");
+                            // self.bridge.send_to_async(AsyncMsg::ConnectStart {
+                            //     ???
+                            // });
+                            self.bridge.send_to_async(AsyncMsg::MsgVersion {
+                                major: 1,
+                                minor: 2,
+                                patch: 3,
+                            });
                         }
-                        Err(_bad) => {
-                            eprintln!("to_app_recv: got None...");
+                        Some(unhandled) => {
+                            eprintln!("sync_gui: got (UNHANDLED) {unhandled:?}");
+                        }
+                        None => {
+                            // eprintln!("to_app_recv: got None...");
+                            // nothing to do
                         }
                     }
                     // match self.to_app_recv.try_recv() {
