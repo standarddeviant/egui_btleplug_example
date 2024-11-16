@@ -2,9 +2,9 @@
 // use crate::transport::DfuTransport;
 
 use crate::async_msg::AsyncMsg;
-use crate::async_msg::GenericResult::ResultSuccess;
+use crate::async_msg::GenericResult::{ResultSuccess, ResultUnknown};
 
-use btleplug::api::{Central, Manager, ScanFilter};
+use btleplug::api::{Central, Manager, Peripheral as _, PeripheralProperties, ScanFilter};
 use btleplug::platform::Adapter;
 use btleplug::platform::Peripheral;
 // use futures::stream::StreamExt;
@@ -12,6 +12,26 @@ use btleplug::platform::Peripheral;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::time::Duration;
 // ::{Sender, Receiver};
+
+// // this is a pure function; output is a strict function of input
+// fn periph_desc_string(props: &PeripheralProperties) -> String {
+//     let mut dlist: Vec<String> = vec![]; // desc list
+//     // name first
+//     if let Some(name) = &props.local_name {
+//         dlist.push(format!("name={}", name));
+//     }
+//
+//     // rssi next
+//     if let Some(rssi_val) = &props.rssi {
+//         dlist.push(format!("rssi={}", rssi_val));
+//     }
+//
+//     // addr next
+//     dlist.push(format!("addr={}", props.address));
+//
+//     // return a joined version as the output
+//     dlist.join(" : ")
+// }
 
 use std::error::Error;
 
@@ -49,8 +69,13 @@ pub async fn ble_transport_task(
         return Ok(());
     }
 
+    // TODO - organize in helper struct?
+
     let adapter = &adapter_list[0];
-    let mut pvec: Vec<Peripheral>;
+    let mut props_vec: Vec<(usize, PeripheralProperties)> = vec![];
+    let mut scanned_periphs: Vec<Peripheral> = vec![];
+    let mut connected_periph: Option<&Peripheral> = None;
+    // let mut connected: &Peripheral;
 
     loop {
         match in_recv.recv().await {
@@ -64,12 +89,20 @@ pub async fn ble_transport_task(
 
                 match adapter.peripherals().await {
                     Ok(periphs) => {
+                        props_vec.clear();
+                        for (ix, periph) in periphs.clone().iter().enumerate() {
+                            if let Ok(Some(props)) = periph.properties().await {
+                                props_vec.push((ix, props));
+                            }
+                        }
+                        scanned_periphs = periphs.clone();
+
                         // NOTE: hold on to local copy of periphs
-                        pvec = periphs.clone();
+                        // pvec = periphs.clone();
                         match out_send
                             .send(AsyncMsg::ScanResult {
                                 result: ResultSuccess,
-                                periphs,
+                                periphs: props_vec.clone(),
                             })
                             .await
                         {
@@ -81,6 +114,64 @@ pub async fn ble_transport_task(
                 };
             } // NOTE: end: got AsyncMsg::ScanStart { filter, duration }
 
+            Some(AsyncMsg::ConnectStart { index, periph }) => {
+                match scanned_periphs[index].connect().await {
+                    Ok(_good) => {
+                        connected_periph = Some(&scanned_periphs[index]);
+                        let res = out_send
+                            .send(AsyncMsg::ConnectResult {
+                                result: ResultSuccess,
+                                index,
+                                periph,
+                            })
+                            .await;
+                        match res {
+                            Ok(_good) => {}
+                            Err(_bad) => {}
+                        }
+
+                        if let Some(p) = connected_periph {
+                            match p.discover_services().await {
+                                Ok(_good) => {
+                                    let res = out_send
+                                        .send(AsyncMsg::Characteristics {
+                                            chars: p.characteristics(),
+                                        })
+                                        .await;
+                                    match res {
+                                        Ok(_good) => (),
+                                        Err(_bad) => (),
+                                    };
+                                }
+                                Err(_bad) => {}
+                            }
+                        }
+                    }
+                    Err(_bad) => {
+                        eprintln!("Hmmm, didn't connect...: {_bad}");
+                        match out_send
+                            .send(AsyncMsg::ConnectResult {
+                                result: ResultUnknown,
+                                index: 0,
+                                periph: PeripheralProperties::default(),
+                            })
+                            .await
+                        {
+                            Ok(_good) => (),
+                            Err(_bad) => (),
+                        };
+
+                        //
+                    }
+                }
+            }
+
+            // Some(AsyncMsg::ReadDeviceInfo { filter, duration }) => {
+            //     //
+            // }
+
+            // Some(AsyncMsg::Error)
+            // filter, duration }) => {}
             Some(unhandled) => {
                 println!("async_ble got (UNHANDLED): {unhandled:?}");
             } // NOTE: end: Some(unhandled)

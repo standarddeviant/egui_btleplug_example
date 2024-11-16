@@ -1,8 +1,9 @@
 // Note: use these types directly from rust<-> rust for now, but enable an external interface via
 // JSON w/ validation
 
-use btleplug::platform::Peripheral;
+use btleplug::api::{Characteristic, PeripheralProperties};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 // #[derive(Serialize, Deserialize)]
 // struct Person {
@@ -85,17 +86,20 @@ pub enum AsyncMsg {
     },
     ScanResult {
         result: GenericResult,
-        periphs: Vec<Peripheral>,
+        periphs: Vec<(usize, PeripheralProperties)>,
         // periphs: Vec<String>,
     },
     ConnectStart {
-        index: i32,
-        periph: Peripheral,
+        index: usize,
+        periph: PeripheralProperties,
     },
     ConnectResult {
         result: GenericResult,
-        index: i32,
-        periph: String,
+        index: usize,
+        periph: PeripheralProperties,
+    },
+    Characteristics {
+        chars: BTreeSet<Characteristic>,
     },
     Payload {
         payload: Vec<u8>,
@@ -103,12 +107,12 @@ pub enum AsyncMsg {
         op: BLEOperation,
     },
     DisconnectStart {
-        index: i32,
+        index: usize,
         periph: String,
     },
     DisconnectResult {
         result: GenericResult,
-        index: i32,
+        index: usize,
         periph: String,
     },
 }

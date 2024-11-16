@@ -3,10 +3,12 @@ use crate::async_msg::GenericResult::*;
 
 use crate::async_bridge::AsyncBridge;
 
-use btleplug::platform::Peripheral;
-
+use btleplug::api::{Characteristic, PeripheralProperties};
 use eframe;
-// use serde::{Deserialize, Serialize};
+// use egui_extras::{Column, TableBuilder};
+use serde::{Deserialize, Serialize};
+
+use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
 enum BLEState {
@@ -79,7 +81,10 @@ pub struct GuiApp {
     last_name: String,
 
     // #[serde(skip)] // This how you opt-out of serialization of a field
-    periphs: Vec<Peripheral>,
+    periphs: Vec<(usize, PeripheralProperties)>,
+
+    // #[serde(skip)] // This how you opt-out of serialization of a field
+    chars: BTreeSet<Characteristic>,
 
     // let (to_dev_tx, to_dev_rx) = tokio::sync::mpsc::new(32);
     // let (from_dev_tx, from_dev_rx) = tokio::sync::mpsc::new(32);
@@ -192,6 +197,7 @@ impl GuiApp {
             last_address: "".into(),
             last_name: "".into(),
             periphs: vec![],
+            chars: BTreeSet::new(),
             scan_start_time: Instant::now(),
             scan_duration: Duration::from_secs_f32(5.0),
             bridge: AsyncBridge::new(),
@@ -255,7 +261,7 @@ impl eframe::App for GuiApp {
                     match self.bridge.try_recv_from_async() {
                         Some(AsyncMsg::ScanResult { result, periphs }) => {
                             println!("sync_gui: got ScanResult ({result:?})");
-                            println!("    {periphs:?}");
+                            // println!("    {periphs:?}");
                             self.periphs = periphs;
                             self.ble_state = BLEState::Connectable;
                             // self.bridge.send_to_async(AsyncMsg::ConnectStart {
@@ -278,13 +284,49 @@ impl eframe::App for GuiApp {
                 }
                 BLEState::Connectable => {
                     ui.label(format!("Choose a peripheral to connect...")); // time is {:#?} seconds", since as u32));
-                    for p in &self.periphs {
-                        ui.label(format!("{p:?}"));
+                    for (ix, p) in &self.periphs {
+                        if ui.button(format!("Connect: {p:?}")).clicked() {
+                            self.bridge.send_to_async(AsyncMsg::ConnectStart {
+                                index: *ix,
+                                periph: p.clone(),
+                            });
+                            self.ble_state = BLEState::Connecting;
+                            break;
+                        };
                     }
                 }
-                BLEState::Connecting => {}
-                BLEState::Connected => {}
+
+                BLEState::Connecting => {
+                    ui.label("Connecting...");
+                    match self.bridge.try_recv_from_async() {
+                        Some(AsyncMsg::ConnectResult {
+                            result,
+                            index,
+                            periph,
+                        }) => {
+                            println!("sync_gui: connected");
+                            // we can't do much until the services are discovered, so just chill
+                            // here for now?
+                        }
+                        Some(AsyncMsg::Characteristics { chars }) => {
+                            println!("sync_gui: received ({}) chars", chars.len());
+                            self.chars = chars;
+                            self.ble_state = BLEState::Connected;
+                        }
+                        Some(unhandled) => {
+                            println!("sync_gui: got (UNHANDLED) msg: {unhandled:?}");
+                        }
+                        None => {}
+                    }
+                }
+                BLEState::Connected => {
+                    for c in &self.chars {
+                        ui.label(format!("{c:?}"));
+                    }
+                    ui.label(format!("Connected, discovering services..."));
+                }
             };
+
             // The central panel the region left after adding TopPanel's and SidePanel's
             ui.heading("eframe template");
 
