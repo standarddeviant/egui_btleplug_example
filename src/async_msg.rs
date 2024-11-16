@@ -1,7 +1,9 @@
 // Note: use these types directly from rust<-> rust for now, but enable an external interface via
 // JSON w/ validation
 
+use btleplug::api::{Characteristic, PeripheralProperties};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 // #[derive(Serialize, Deserialize)]
 // struct Person {
@@ -69,8 +71,10 @@ pub enum BLEOperation {
 // #[derive(Serialize, Deserialize)]
 // struct DisconnectResult {
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+// #[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum AsyncMsg {
+    Error(String),
     MsgVersion {
         major: i32,
         minor: i32,
@@ -82,29 +86,33 @@ pub enum AsyncMsg {
     },
     ScanResult {
         result: GenericResult,
-        periphs: Vec<String>,
+        props_vec: Vec<(usize, PeripheralProperties)>,
+        // periphs: Vec<String>,
     },
     ConnectStart {
-        index: i32,
-        periph: String,
+        index: usize,
+        props: PeripheralProperties,
     },
     ConnectResult {
         result: GenericResult,
-        index: i32,
-        periph: String,
+        index: usize,
+        props: PeripheralProperties,
+    },
+    Characteristics {
+        chars: BTreeSet<Characteristic>,
+    },
+    DisconnectStart {
+        index: usize,
+        props: PeripheralProperties,
+    },
+    DisconnectResult {
+        result: GenericResult,
+        index: usize,
+        props: PeripheralProperties,
     },
     Payload {
         payload: Vec<u8>,
         char: i32,
         op: BLEOperation,
-    },
-    DisconnectStart {
-        index: i32,
-        periph: String,
-    },
-    DisconnectResult {
-        result: GenericResult,
-        index: i32,
-        periph: String,
     },
 }

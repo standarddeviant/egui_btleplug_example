@@ -60,8 +60,8 @@ impl AsyncBridge {
         }
     }
 
-    pub fn send_to_async(&self, task: AsyncMsg) {
-        match self.to_async.blocking_send(task) {
+    pub fn send_to_async(&self, msg: AsyncMsg) {
+        match self.to_async.blocking_send(msg) {
             Ok(()) => {}
             Err(_) => panic!("The shared runtime has shut down."),
         }
