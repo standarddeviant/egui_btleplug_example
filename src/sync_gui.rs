@@ -3,14 +3,16 @@ use crate::async_msg::GenericResult::*;
 
 use crate::async_bridge::AsyncBridge;
 
+use btleplug::platform::Peripheral;
+
 use eframe;
 // use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc::Sender;
 
 enum BLEState {
     Disconnected,
     Scanning,
+    Connectable,
     Connecting,
     Connected,
 }
@@ -77,7 +79,7 @@ pub struct GuiApp {
     last_name: String,
 
     // #[serde(skip)] // This how you opt-out of serialization of a field
-    pstrings: Vec<String>,
+    periphs: Vec<Peripheral>,
 
     // let (to_dev_tx, to_dev_rx) = tokio::sync::mpsc::new(32);
     // let (from_dev_tx, from_dev_rx) = tokio::sync::mpsc::new(32);
@@ -189,7 +191,7 @@ impl GuiApp {
             ble_state: BLEState::Disconnected,
             last_address: "".into(),
             last_name: "".into(),
-            pstrings: vec![],
+            periphs: vec![],
             scan_start_time: Instant::now(),
             scan_duration: Duration::from_secs_f32(5.0),
             bridge: AsyncBridge::new(),
@@ -254,14 +256,16 @@ impl eframe::App for GuiApp {
                         Some(AsyncMsg::ScanResult { result, periphs }) => {
                             println!("sync_gui: got ScanResult ({result:?})");
                             println!("    {periphs:?}");
+                            self.periphs = periphs;
+                            self.ble_state = BLEState::Connectable;
                             // self.bridge.send_to_async(AsyncMsg::ConnectStart {
                             //     ???
                             // });
-                            self.bridge.send_to_async(AsyncMsg::MsgVersion {
-                                major: 1,
-                                minor: 2,
-                                patch: 3,
-                            });
+                            // self.bridge.send_to_async(AsyncMsg::MsgVersion {
+                            //     major: 1,
+                            //     minor: 2,
+                            //     patch: 3,
+                            // });
                         }
                         Some(unhandled) => {
                             eprintln!("sync_gui: got (UNHANDLED) {unhandled:?}");
@@ -271,15 +275,12 @@ impl eframe::App for GuiApp {
                             // nothing to do
                         }
                     }
-                    // match self.to_app_recv.try_recv() {
-                    //     Ok(m) => {
-                    //         println!("app: to_app_recv = ...");
-                    //         println!("{m:?}");
-                    //     }
-                    //     Err(bad) => {
-                    //         eprintln!("hmmm... {bad}");
-                    //     }
-                    // }
+                }
+                BLEState::Connectable => {
+                    ui.label(format!("Choose a peripheral to connect...")); // time is {:#?} seconds", since as u32));
+                    for p in &self.periphs {
+                        ui.label(format!("{p:?}"));
+                    }
                 }
                 BLEState::Connecting => {}
                 BLEState::Connected => {}
@@ -309,7 +310,11 @@ impl eframe::App for GuiApp {
                 egui::warn_if_debug_build(ui);
             });
         });
-    }
+
+        // repaint often, but sleep a bit...
+        std::thread::sleep(Duration::from_millis(5));
+        ctx.request_repaint();
+    } // NOTE: end egui update
 }
 
 fn powered_by_egui_and_eframe(ui: &mut egui::Ui) {

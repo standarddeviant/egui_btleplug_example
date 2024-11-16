@@ -1,6 +1,7 @@
 // Note: use these types directly from rust<-> rust for now, but enable an external interface via
 // JSON w/ validation
 
+use btleplug::platform::Peripheral;
 use serde::{Deserialize, Serialize};
 
 // #[derive(Serialize, Deserialize)]
@@ -69,8 +70,10 @@ pub enum BLEOperation {
 // #[derive(Serialize, Deserialize)]
 // struct DisconnectResult {
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+// #[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum AsyncMsg {
+    Error(String),
     MsgVersion {
         major: i32,
         minor: i32,
@@ -82,11 +85,12 @@ pub enum AsyncMsg {
     },
     ScanResult {
         result: GenericResult,
-        periphs: Vec<String>,
+        periphs: Vec<Peripheral>,
+        // periphs: Vec<String>,
     },
     ConnectStart {
         index: i32,
-        periph: String,
+        periph: Peripheral,
     },
     ConnectResult {
         result: GenericResult,
