@@ -86,33 +86,33 @@ pub enum AsyncMsg {
     },
     ScanResult {
         result: GenericResult,
-        periphs: Vec<(usize, PeripheralProperties)>,
+        props_vec: Vec<(usize, PeripheralProperties)>,
         // periphs: Vec<String>,
     },
     ConnectStart {
         index: usize,
-        periph: PeripheralProperties,
+        props: PeripheralProperties,
     },
     ConnectResult {
         result: GenericResult,
         index: usize,
-        periph: PeripheralProperties,
+        props: PeripheralProperties,
     },
     Characteristics {
         chars: BTreeSet<Characteristic>,
+    },
+    DisconnectStart {
+        index: usize,
+        props: PeripheralProperties,
+    },
+    DisconnectResult {
+        result: GenericResult,
+        index: usize,
+        props: PeripheralProperties,
     },
     Payload {
         payload: Vec<u8>,
         char: i32,
         op: BLEOperation,
-    },
-    DisconnectStart {
-        index: usize,
-        periph: String,
-    },
-    DisconnectResult {
-        result: GenericResult,
-        index: usize,
-        periph: String,
     },
 }

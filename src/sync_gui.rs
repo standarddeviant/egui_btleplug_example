@@ -81,7 +81,10 @@ pub struct GuiApp {
     last_name: String,
 
     // #[serde(skip)] // This how you opt-out of serialization of a field
-    periphs: Vec<(usize, PeripheralProperties)>,
+    props_vec: Vec<(usize, PeripheralProperties)>,
+
+    connected_index: usize,
+    connected_props: PeripheralProperties,
 
     // #[serde(skip)] // This how you opt-out of serialization of a field
     chars: BTreeSet<Characteristic>,
@@ -145,7 +148,7 @@ async fn test_transport_fn(
 
     let sr = AsyncMsg::ScanResult {
         result: ResultSuccess.into(),
-        periphs: vec![],
+        props_vec: vec![],
     };
     println!("\nDBG: test_transport_fn: made msg: {sr:#?}");
     match to_app_send.send(sr).await {
@@ -196,7 +199,9 @@ impl GuiApp {
             ble_state: BLEState::Disconnected,
             last_address: "".into(),
             last_name: "".into(),
-            periphs: vec![],
+            props_vec: vec![],
+            connected_index: 1_000_000,
+            connected_props: PeripheralProperties::default(),
             chars: BTreeSet::new(),
             scan_start_time: Instant::now(),
             scan_duration: Duration::from_secs_f32(5.0),
@@ -204,6 +209,25 @@ impl GuiApp {
             // rt_handle: rt.handle().clone(),
         }
     }
+}
+
+fn periph_desc_string(props: &PeripheralProperties) -> String {
+    let mut out: Vec<String> = vec![];
+    if let Some(name) = &props.local_name {
+        out.push(format!("name={}", name));
+    }
+
+    if let Some(rssi_val) = &props.rssi {
+        out.push(format!("rssi={}", rssi_val));
+    }
+
+    out.push(format!("{:?}", props.address));
+
+    if props.manufacturer_data.len() > 0 {
+        out.push(format!("{:?}", props.manufacturer_data));
+    }
+
+    out.join(" : ")
 }
 
 impl eframe::App for GuiApp {
@@ -259,10 +283,10 @@ impl eframe::App for GuiApp {
                     ui.label(format!("Scanning...")); // time is {:#?} seconds", since as u32));
 
                     match self.bridge.try_recv_from_async() {
-                        Some(AsyncMsg::ScanResult { result, periphs }) => {
+                        Some(AsyncMsg::ScanResult { result, props_vec }) => {
                             println!("sync_gui: got ScanResult ({result:?})");
                             // println!("    {periphs:?}");
-                            self.periphs = periphs;
+                            self.props_vec = props_vec;
                             self.ble_state = BLEState::Connectable;
                             // self.bridge.send_to_async(AsyncMsg::ConnectStart {
                             //     ???
@@ -282,13 +306,24 @@ impl eframe::App for GuiApp {
                         }
                     }
                 }
+
                 BLEState::Connectable => {
+                    if ui.button(format!("Rescan")).clicked() {
+                        self.ble_state = BLEState::Scanning;
+                        self.bridge.send_to_async(AsyncMsg::ScanStart {
+                            filter: "".into(),
+                            duration: 5.0,
+                        });
+                    }
                     ui.label(format!("Choose a peripheral to connect...")); // time is {:#?} seconds", since as u32));
-                    for (ix, p) in &self.periphs {
-                        if ui.button(format!("Connect: {p:?}")).clicked() {
+                    for (ix, p) in &self.props_vec {
+                        if ui
+                            .button(format!("Connect: {}", periph_desc_string(&p)))
+                            .clicked()
+                        {
                             self.bridge.send_to_async(AsyncMsg::ConnectStart {
                                 index: *ix,
-                                periph: p.clone(),
+                                props: p.clone(),
                             });
                             self.ble_state = BLEState::Connecting;
                             break;
@@ -298,13 +333,29 @@ impl eframe::App for GuiApp {
 
                 BLEState::Connecting => {
                     ui.label("Connecting...");
+                    if ui.button(format!("Rescan")).clicked() {
+                        self.ble_state = BLEState::Scanning;
+                        self.bridge.send_to_async(AsyncMsg::ScanStart {
+                            filter: "".into(),
+                            duration: 5.0,
+                        });
+                    }
+
                     match self.bridge.try_recv_from_async() {
                         Some(AsyncMsg::ConnectResult {
                             result,
                             index,
-                            periph,
+                            props,
                         }) => {
-                            println!("sync_gui: connected");
+                            match result {
+                                ResultSuccess => {
+                                    println!("sync_gui: connected");
+                                }
+                                _ => {
+                                    println!("sync_gui: got {result:?}");
+                                    self.ble_state = BLEState::Disconnected;
+                                }
+                            }
                             // we can't do much until the services are discovered, so just chill
                             // here for now?
                         }
@@ -320,6 +371,14 @@ impl eframe::App for GuiApp {
                     }
                 }
                 BLEState::Connected => {
+                    if ui.button(format!("Disconnect")).clicked() {
+                        self.ble_state = BLEState::Disconnected;
+                        self.bridge.send_to_async(AsyncMsg::DisconnectStart {
+                            index: self.connected_index,
+                            props: self.connected_props.clone(),
+                        });
+                    }
+
                     for c in &self.chars {
                         ui.label(format!("{c:?}"));
                     }
