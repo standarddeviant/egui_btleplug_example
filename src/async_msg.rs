@@ -36,41 +36,6 @@ pub enum BLEOperation {
     Indicate = 7,
 }
 
-// #[derive(Serialize, Deserialize)]
-// struct MsgVersion {
-//     major: i32,
-//     minor: i32,
-//     patch: i32,
-// }
-//
-// #[derive(Serialize, Deserialize)]
-// struct ConnectStart {
-//     index: i32,
-//     periph: String,
-// }
-//
-// #[derive(Serialize, Deserialize)]
-// struct ConnectResult {
-//     result: GenericResult,
-//     index: i32,
-//     periph: String,
-// }
-//
-// #[derive(Serialize, Deserialize)]
-// struct Payload {
-//     payload: Vec<u8>,
-//     char: i32,
-//     op: BLEOperation,
-// }
-//
-// #[derive(Serialize, Deserialize)]
-// struct DisconnectStart {
-//     index: i32,
-//     periph: String,
-// }
-// #[derive(Serialize, Deserialize)]
-// struct DisconnectResult {
-
 // #[derive(Clone, Debug, Serialize, Deserialize)]
 #[derive(Clone, Debug)]
 pub enum AsyncMsg {
