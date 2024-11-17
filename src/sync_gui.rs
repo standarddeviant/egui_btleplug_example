@@ -1,8 +1,10 @@
-use crate::async_msg::AsyncMsg;
+use crate::async_msg::{AsyncMsg, BLEOperation};
+
 use crate::async_msg::GenericResult::*;
 
 use crate::async_bridge::AsyncBridge;
 
+use btleplug::api::CharPropFlags;
 use btleplug::api::{Characteristic, PeripheralProperties};
 use eframe;
 use egui::ahash::HashSet;
@@ -95,19 +97,54 @@ pub struct GuiApp {
     svc_keys: Vec<Uuid>,
     svc_map: HashMap<Uuid, Vec<Characteristic>, RandomState>,
 
+    waiting_payload: Option<AsyncMsg>,
+
+    char_values: HashMap<Uuid, Vec<u8>>,
+
+    // let (to_dev_tx, to_dev_rx) = tokio::sync::mpsc::new(32);
+    // let (from_dev_tx, from_dev_rx) = tokio::sync::mpsc::new(32);
+    // #[serde(skip)] // This how you opt-out of serialization of a field
+    // to_ble_send: tokio::sync::mpsc::Sender<AsyncMsg>,
+    // // #[serde(skip)] // This how you opt-out of serialization of a field
+    // to_app_recv: tokio::sync::mpsc::Receiver<AsyncMsg>,
+
     // #[serde(skip)] // This how you opt-out of serialization of a field
     scan_start_time: Instant,
 
     scan_duration: Duration,
-
     // #[serde(skip)] // This how you opt-out of serialization of a field
+    // rt_handle: tokio::runtime::Handle,
     bridge: AsyncBridge,
 }
 
-async fn _test_transport_fn(
+// impl Default for ProbleApp {
+//     fn default() -> Self {
+//         let (junk_send, junk_recv) = tokio::sync::mpsc::channel(32);
+//         let junk_rt = tokio::runtime::Runtime::new().unwrap();
+//         let junk_rt_handle = junk_rt.handle();
+//
+//         // let (_, junk_recv) = std::sync::mpsc::channel();
+//         Self {
+//             // Example stuff:
+//             ble_state: BLEState::Disconnected,
+//             last_address: "".to_owned(),
+//             last_name: "".to_owned(),
+//             pstrings: [].into(),
+//             to_ble_send: junk_send,
+//             to_app_recv: junk_recv,
+//             scan_start: Instant::now(),
+//             scan_duration: Duration::from_secs_f32(0.0 as f32),
+//             // rt_handle: junk_rt_handle.clone(),
+//         }
+//     }
+// }
+
+async fn test_transport_fn(
     to_app_send: tokio::sync::mpsc::Sender<AsyncMsg>,
     mut to_ble_recv: tokio::sync::mpsc::Receiver<AsyncMsg>,
 ) {
+    // recv_from_app
+    // info!("DBG: info test!");
     println!("DBG: test_transport_fn");
     println!("DBG: test_transport_fn: waiting on to_ble_recv.recv().await ... ");
 
@@ -140,7 +177,35 @@ async fn _test_transport_fn(
 
 impl GuiApp {
     /// Called once before the first frame.
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        // to_ble_send: tokio::sync::mpsc::Sender<ProbleMsg>,
+        // to_app_recv: tokio::sync::mpsc::Receiver<ProbleMsg>,
+    ) -> Self {
+        // This is also where you can customize the look and feel of egui using
+        // `cc.egui_ctx.set_visuals` and `cc.egui_ctx.set_fonts`.
+
+        // Load previous app state (if any).
+        // Note that you must enable the `persistence` feature for this to work.
+
+        // let (to_ble_send, to_ble_recv) = tokio::sync::mpsc::channel(32);
+        // let (to_app_send, to_app_recv) = tokio::sync::mpsc::channel(32);
+
+        // if let Some(storage) = cc.storage {
+        //     return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
+        // }
+
+        // spawn a tokio runtime/btleplug task
+        // std::thread::spawn(move || {
+        //     let rt: Runtime = Builder::new_current_thread().enable_all().build().unwrap();
+        //     rt.block_on(async move {
+        //         test_transport_fn(to_app_send, to_ble_recv).await;
+        //     });
+        // });
+
+        // let (junk_send, _) = tokio::sync::mpsc::channel(32);
+        // let (_, junk_recv) = std::sync::mpsc::channel();
+
         // Default::default()
         GuiApp {
             ble_state: BLEState::Disconnected,
@@ -153,17 +218,81 @@ impl GuiApp {
             svc_map: HashMap::<Uuid, Vec<Characteristic>, RandomState>::from_iter(
                 std::iter::empty(),
             ),
+            waiting_payload: None,
+            char_values: HashMap::<Uuid, Vec<u8>, RandomState>::from_iter(std::iter::empty()),
             scan_start_time: Instant::now(),
             scan_duration: Duration::from_secs_f32(5.0),
             bridge: AsyncBridge::new(),
             // rt_handle: rt.handle().clone(),
         }
     }
+}
 
-    fn draw_top_panel(&mut self, ctx: &egui::Context) {
-        //, _frame: &mut eframe::Frame) {
+fn periph_desc_string(props: &PeripheralProperties) -> String {
+    let mut out: Vec<String> = vec![];
+    if let Some(name) = &props.local_name {
+        out.push(format!("name={}", name));
+    }
+
+    if let Some(rssi_val) = &props.rssi {
+        out.push(format!("rssi={}", rssi_val));
+    }
+
+    out.push(format!("{:?}", props.address));
+
+    if props.manufacturer_data.len() > 0 {
+        out.push(format!("{:?}", props.manufacturer_data));
+    }
+
+    out.join(" : ")
+}
+
+fn sort_svcs_chars(
+    chars: BTreeSet<Characteristic>,
+) -> (Vec<Uuid>, HashMap<Uuid, Vec<Characteristic>, RandomState>) {
+    let svc_uuid_set: std::collections::HashSet<Uuid, egui::ahash::RandomState> =
+        HashSet::from_iter(chars.clone().iter().map(|c| c.service_uuid));
+    let mut svc_uuid_vec: Vec<Uuid> = Vec::from_iter(svc_uuid_set.iter().map(|r| r.clone()));
+    // INFO: making the output type not use references is helpful to not worry about lifetimes in structs...
+    // INFO: so we make a vector of reference clones for convenience
+    // let svc_uuid_vec: Vec<Uuid> = Vec::from_iter(svc_uuid_set.iter());
+    svc_uuid_vec.sort();
+
+    // INFO: making the output type not use references is helpful to not worry about lifetimes in structs...
+    // INFO: so we make a vector of reference clones for convenience
+    let tmpchars: Vec<Characteristic> = chars.into_iter().map(|f| f.clone()).collect();
+
+    let mut svc_map: HashMap<Uuid, Vec<Characteristic>, RandomState> =
+        HashMap::<Uuid, Vec<Characteristic>, RandomState>::new();
+    for svc_uuid in svc_uuid_vec.clone() {
+        let mut tmpvec: Vec<Characteristic> = tmpchars
+            .clone()
+            .iter()
+            .map(|r| r.clone())
+            .filter(|c| c.service_uuid == svc_uuid)
+            .collect();
+        tmpvec.sort();
+        svc_map.insert(svc_uuid, tmpvec);
+    }
+
+    (svc_uuid_vec, svc_map)
+}
+
+impl eframe::App for GuiApp {
+    /// Called by the frame work to save state before shutdown.
+    // fn save(&mut self, storage: &mut dyn eframe::Storage) {
+    //     eframe::set_value(storage, eframe::APP_KEY, self);
+    // }
+
+    /// Called each time the UI needs repainting, which may be many times per second.
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // ctx.request_repaint();
+        // Put your widgets into a `SidePanel`, `TopBottomPanel`, `CentralPanel`, `Window` or `Area`.
+        // For inspiration and more examples, go to https://emilk.github.io/egui
+
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // The top panel is often a good place for a menu bar:
+
             egui::menu::bar(ui, |ui| {
                 // NOTE: no File->Quit on web pages!
                 let is_web = cfg!(target_arch = "wasm32");
@@ -179,9 +308,7 @@ impl GuiApp {
                 egui::widgets::global_theme_preference_buttons(ui);
             });
         });
-    }
 
-    fn draw_central_panel(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 match self.ble_state {
@@ -320,6 +447,22 @@ impl GuiApp {
                             });
                         }
 
+                        // TODO: receiving values like this could be done outside this nested logic...
+                        // TODO: move this logic to a common helper function
+                        match self.bridge.try_recv_from_async() {
+                            Some(AsyncMsg::Payload { payload, char, op }) => {
+                                if let Some(_some_waiting_payload) = self.waiting_payload.clone() {
+                                    // TODO: check the char+op agains self.waiting_payload
+                                    self.waiting_payload = None;
+                                    self.char_values.insert(char.uuid, payload);
+                                }
+                            }
+                            Some(unhandled) => {
+                                eprintln!("sync_gui: got (UNHANDLED) msg: {unhandled:?}");
+                            }
+                            None => (),
+                        }
+
                         let svc_uuid_vec = self.svc_keys.clone();
                         for svc_uuid in svc_uuid_vec {
                             ui.collapsing(format!("Service: {svc_uuid:?}"), |ui| {
@@ -329,6 +472,28 @@ impl GuiApp {
                                     .expect("trying to get value from svc map");
                                 for c in char_vec {
                                     ui.label(format!("{} : {:?}", c.uuid, c.properties));
+                                    if c.properties.contains(CharPropFlags::READ) {
+                                        if ui.button("Read").clicked() {
+                                            let m = AsyncMsg::Payload {
+                                                payload: vec![],
+                                                char: c.clone(),
+                                                op: BLEOperation::Read,
+                                            };
+
+                                            self.waiting_payload = Some(m.clone());
+                                            self.bridge.send_to_async(m);
+                                        }
+                                        if self.char_values.contains_key(&c.uuid) {
+                                            ui.label(format!(
+                                                "Read value: {:?}",
+                                                self.char_values.get(&c.uuid).unwrap(),
+                                            ));
+                                        }
+
+                                        // if self.char_values.keys().contains(c.uuid) {
+                                        //     // heyo!
+                                        // }
+                                    }
                                 }
                             });
                         }
@@ -337,75 +502,11 @@ impl GuiApp {
                 ui.separator();
             }); // NOTE: end: egui::ScrollArea::vertical().show(ui, |ui| ...
         }); // NOTE: end: egui::CentralPanel::default().show(ctx, |ui| ...
-    } // NOTE: end: fn draw_central_panel(&mut self, ctx: &egui::Context)
-}
-
-fn periph_desc_string(props: &PeripheralProperties) -> String {
-    let mut out: Vec<String> = vec![];
-    if let Some(name) = &props.local_name {
-        out.push(format!("name={}", name));
-    }
-
-    if let Some(rssi_val) = &props.rssi {
-        out.push(format!("rssi={}", rssi_val));
-    }
-
-    out.push(format!("{:?}", props.address));
-
-    if props.manufacturer_data.len() > 0 {
-        out.push(format!("{:?}", props.manufacturer_data));
-    }
-
-    out.join(" : ")
-}
-
-fn sort_svcs_chars(
-    chars: BTreeSet<Characteristic>,
-) -> (Vec<Uuid>, HashMap<Uuid, Vec<Characteristic>, RandomState>) {
-    let svc_uuid_set: std::collections::HashSet<Uuid, egui::ahash::RandomState> =
-        HashSet::from_iter(chars.clone().iter().map(|c| c.service_uuid));
-    let mut svc_uuid_vec: Vec<Uuid> = Vec::from_iter(svc_uuid_set.iter().map(|r| r.clone()));
-    // INFO: making the output type not use references is helpful to not worry about lifetimes in structs...
-    // INFO: so we make a vector of reference clones for convenience
-    // let svc_uuid_vec: Vec<Uuid> = Vec::from_iter(svc_uuid_set.iter());
-    svc_uuid_vec.sort();
-
-    // INFO: making the output type not use references is helpful to not worry about lifetimes in structs...
-    // INFO: so we make a vector of reference clones for convenience
-    let tmpchars: Vec<Characteristic> = chars.into_iter().map(|f| f.clone()).collect();
-
-    let mut svc_map: HashMap<Uuid, Vec<Characteristic>, RandomState> =
-        HashMap::<Uuid, Vec<Characteristic>, RandomState>::new();
-    for svc_uuid in svc_uuid_vec.clone() {
-        let mut tmpvec: Vec<Characteristic> = tmpchars
-            .clone()
-            .iter()
-            .map(|r| r.clone())
-            .filter(|c| c.service_uuid == svc_uuid)
-            .collect();
-        tmpvec.sort();
-        svc_map.insert(svc_uuid, tmpvec);
-    }
-
-    (svc_uuid_vec, svc_map)
-}
-
-impl eframe::App for GuiApp {
-    /// Called by the frame work to save state before shutdown.
-    // fn save(&mut self, storage: &mut dyn eframe::Storage) {
-    //     eframe::set_value(storage, eframe::APP_KEY, self);
-    // }
-
-    /// Called each time the UI needs repainting, which may be many times per second.
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.draw_top_panel(ctx);
-
-        self.draw_central_panel(ctx);
 
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 powered_by_egui_and_eframe(ui);
-                // egui::warn_if_debug_build(ui);
+                egui::warn_if_debug_build(ui);
             });
         });
 

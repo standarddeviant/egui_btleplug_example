@@ -1,8 +1,8 @@
 // use crate::transport::dfu_uuids::*;
 // use crate::transport::DfuTransport;
 
-use crate::async_msg::AsyncMsg;
 use crate::async_msg::GenericResult::{ResultSuccess, ResultUnknown};
+use crate::async_msg::{AsyncMsg, BLEOperation};
 
 use btleplug::api::{Central, Manager, Peripheral as _, PeripheralProperties, ScanFilter};
 use btleplug::platform::Adapter;
@@ -174,6 +174,39 @@ pub async fn ble_transport_task(
                     }
                 }
             } // NOTE: end: Some(AsyncMsg::ConnectStart { index, props }) => {...}
+
+            Some(AsyncMsg::Payload { payload, char, op }) => {
+                match op {
+                    BLEOperation::Read => {
+                        println!("async_ble: got Payload{{ payload: {payload:?}, char: {char:?}, op: {op:?} }}");
+                        if let Some(ci) = ble.connected_index {
+                            println!("async_ble: await on read...");
+                            match ble.scanned_periphs[ci].read(&char).await {
+                                Ok(rdbuf) => {
+                                    let resp = AsyncMsg::Payload {
+                                        payload: rdbuf,
+                                        char: char.clone(),
+                                        op: crate::async_msg::BLEOperation::EnableIndicate,
+                                    };
+                                    match out_send.send(resp).await {
+                                        Ok(_good) => {}
+                                        Err(_bad) => {
+                                            eprintln!("hmmm... {_bad}");
+                                        }
+                                    };
+                                }
+                                Err(_bad) => {
+                                    eprintln!("hmmm... {_bad}");
+                                }
+                            }
+                        }
+                        // TODO: handle read...
+                    }
+                    _ => {
+                        println!("ble_async: got (UNHANDLED) Payload{{ payload: {payload:?}, op: {op:?}, char: {char} }}");
+                    }
+                }
+            }
 
             Some(AsyncMsg::DisconnectStart { index, props }) => {
                 println!("async_ble acting on AsyncMsg::DisconnectStart{{ {index}, {props:?} }}");

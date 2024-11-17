@@ -77,7 +77,7 @@ pub enum AsyncMsg {
     },
     Payload {
         payload: Vec<u8>,
-        char: i32,
+        char: Characteristic,
         op: BLEOperation,
     },
 }
