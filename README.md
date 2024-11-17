@@ -20,6 +20,23 @@ capabilities of this demo app to eventually include features like
 - Arbitrary reads + writes on discovered characteristics
 - Show Device Info
 
+### GUI State Diagram
+Since we use an immediate mode gui, `egui`, the GUI must be drawn completely from the persistent state of the `GuiApp`. The core variable is `ble_state` of type `BLEState` which has the following state diagram:
+```mermaid
+flowchart LR
+    Start@{ shape: circle, label: "" } --> Disconnected
+    Disconnected --> Scanning
+    Scanning --> Connectable
+    Connectable --> Connecting
+    Connecting --> Connected
+    Connected --> Disconnected
+
+    Connecting --> Scanning
+```
+
+In the `Connected` state, actions can be taken on characteristics.
+
+
 ### Messaging Improvement
 There is a single, bi-directional message enum that is sent across the bridge.
 

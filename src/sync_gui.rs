@@ -1,8 +1,10 @@
-use crate::async_msg::AsyncMsg;
+use crate::async_msg::{AsyncMsg, BLEOperation};
+
 use crate::async_msg::GenericResult::*;
 
 use crate::async_bridge::AsyncBridge;
 
+use btleplug::api::CharPropFlags;
 use btleplug::api::{Characteristic, PeripheralProperties};
 use eframe;
 use egui::ahash::HashSet;
@@ -80,11 +82,8 @@ pub struct GuiApp {
     // #[serde(skip)] // This how you opt-out of serialization of a field
     ble_state: BLEState,
 
-    // Example stuff:
-    last_address: String,
-
-    // Example stuff:
-    last_name: String,
+    /// simple scan filter
+    filter: String,
 
     // #[serde(skip)] // This how you opt-out of serialization of a field
     props_vec: Vec<(usize, PeripheralProperties)>,
@@ -97,6 +96,10 @@ pub struct GuiApp {
 
     svc_keys: Vec<Uuid>,
     svc_map: HashMap<Uuid, Vec<Characteristic>, RandomState>,
+
+    waiting_payload: Option<AsyncMsg>,
+
+    char_values: HashMap<Uuid, Vec<u8>>,
 
     // let (to_dev_tx, to_dev_rx) = tokio::sync::mpsc::new(32);
     // let (from_dev_tx, from_dev_rx) = tokio::sync::mpsc::new(32);
@@ -206,8 +209,7 @@ impl GuiApp {
         // Default::default()
         GuiApp {
             ble_state: BLEState::Disconnected,
-            last_address: "".into(),
-            last_name: "".into(),
+            filter: "".into(),
             props_vec: vec![],
             connected_index: 1_000_000,
             connected_props: PeripheralProperties::default(),
@@ -216,6 +218,8 @@ impl GuiApp {
             svc_map: HashMap::<Uuid, Vec<Characteristic>, RandomState>::from_iter(
                 std::iter::empty(),
             ),
+            waiting_payload: None,
+            char_values: HashMap::<Uuid, Vec<u8>, RandomState>::from_iter(std::iter::empty()),
             scan_start_time: Instant::now(),
             scan_duration: Duration::from_secs_f32(5.0),
             bridge: AsyncBridge::new(),
@@ -306,173 +310,206 @@ impl eframe::App for GuiApp {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            // println!(
-            //     "DBG: to_app_recv.is_channel_closed() = {}",
-            //     self.to_app_recv.is_closed()
-            // );
-            match self.ble_state {
-                BLEState::Disconnected => {
-                    if ui.button("Start Scan").clicked() {
-                        self.ble_state = BLEState::Scanning;
-                        self.scan_start_time = Instant::now();
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                match self.ble_state {
+                    BLEState::Disconnected => {
+                        ui.horizontal(|ui| {
+                            if ui.button("Start Scan").clicked() {
+                                self.ble_state = BLEState::Scanning;
+                                self.scan_start_time = Instant::now();
 
-                        self.bridge.send_to_async(AsyncMsg::ScanStart {
-                            filter: "".into(),
-                            duration: 5.0,
-                        });
-                    }
-                }
-                BLEState::Scanning => {
-                    // let since = Instant::now() - self.scan_start;
-                    ui.label(format!("Scanning...")); // time is {:#?} seconds", since as u32));
-
-                    match self.bridge.try_recv_from_async() {
-                        Some(AsyncMsg::ScanResult { result, props_vec }) => {
-                            println!("sync_gui: got ScanResult ({result:?})");
-                            self.props_vec = props_vec;
-                            self.ble_state = BLEState::Connectable;
-                        }
-                        Some(unhandled) => {
-                            eprintln!("sync_gui: got (UNHANDLED) {unhandled:?}");
-                        }
-                        None => {
-                            // eprintln!("to_app_recv: got None...");
-                            // nothing to do
-                        }
-                    }
-                }
-
-                BLEState::Connectable => {
-                    if ui.button(format!("Rescan")).clicked() {
-                        self.ble_state = BLEState::Scanning;
-                        self.bridge.send_to_async(AsyncMsg::ScanStart {
-                            filter: "".into(),
-                            duration: 5.0,
-                        });
-                    }
-                    ui.label(format!("Choose a peripheral to connect..."));
-                    for (ix, p) in &self.props_vec {
-                        if ui
-                            .button(format!("Connect: {}", periph_desc_string(&p)))
-                            .clicked()
-                        {
-                            self.bridge.send_to_async(AsyncMsg::ConnectStart {
-                                index: *ix,
-                                props: p.clone(),
-                            });
-                            self.ble_state = BLEState::Connecting;
-                            break;
-                        };
-                    }
-                }
-
-                BLEState::Connecting => {
-                    ui.label("Connecting...");
-                    if ui.button(format!("Rescan")).clicked() {
-                        self.ble_state = BLEState::Scanning;
-                        self.bridge.send_to_async(AsyncMsg::ScanStart {
-                            filter: "".into(),
-                            duration: 5.0,
-                        });
-                    }
-
-                    match self.bridge.try_recv_from_async() {
-                        Some(AsyncMsg::ConnectResult {
-                            result,
-                            index,
-                            props,
-                        }) => {
-                            match result {
-                                ResultSuccess => {
-                                    println!("sync_gui: connected");
-                                }
-                                _ => {
-                                    println!("sync_gui: got {result:?}");
-                                    self.ble_state = BLEState::Disconnected;
-                                }
-                            }
-                            // we can't do much until the services are discovered, so just chill
-                            // here for now?
-                        }
-                        Some(AsyncMsg::Characteristics { chars }) => {
-                            println!("sync_gui: received ({}) chars", chars.len());
-                            self.chars = chars.clone();
-                            self.ble_state = BLEState::Connected;
-
-                            (self.svc_keys, self.svc_map) = sort_svcs_chars(chars.clone());
-
-                            // construct a sorted tree repr of [services --> chars] exactly (1) time so the display is consistent
-                            for svc_uuid in self.svc_keys.clone() {
-                                ui.collapsing(format!("Service: {svc_uuid:?}"), |ui| {
-                                    let cvec =
-                                        self.svc_map.get(&svc_uuid).expect("Key error in svc_map");
-                                    for c in cvec {
-                                        ui.label(format!("    {c:?}"));
-                                    }
+                                self.bridge.send_to_async(AsyncMsg::ScanStart {
+                                    filter: "".into(),
+                                    duration: 5.0,
                                 });
                             }
-                        }
-                        Some(unhandled) => {
-                            println!("sync_gui: got (UNHANDLED) msg: {unhandled:?}");
-                        }
-                        None => {}
-                    }
-                }
-                BLEState::Connected => {
-                    if ui.button(format!("Disconnect")).clicked() {
-                        self.ble_state = BLEState::Disconnected;
-                        self.bridge.send_to_async(AsyncMsg::DisconnectStart {
-                            index: self.connected_index,
-                            props: self.connected_props.clone(),
+
+                            let filter_label = ui.label("Filter: ");
+                            ui.text_edit_singleline(&mut self.filter)
+                                .labelled_by(filter_label.id);
                         });
                     }
 
-                    let svc_uuid_vec = self.svc_keys.clone();
-                    for svc_uuid in svc_uuid_vec {
-                        ui.collapsing(format!("Service: {svc_uuid:?}"), |ui| {
-                            let char_vec = self
-                                .svc_map
-                                .get(&svc_uuid)
-                                .expect("trying to get value from svc map");
-                            for c in char_vec {
-                                ui.label(format!("{} : {:?}", c.uuid, c.properties));
+                    BLEState::Scanning => {
+                        // let since = Instant::now() - self.scan_start;
+                        ui.label(format!("Scanning...")); // time is {:#?} seconds", since as u32));
+
+                        match self.bridge.try_recv_from_async() {
+                            Some(AsyncMsg::ScanResult { result, props_vec }) => {
+                                println!("sync_gui: got ScanResult ({result:?})");
+                                self.props_vec = props_vec;
+                                self.ble_state = BLEState::Connectable;
                             }
-                        });
+                            Some(unhandled) => {
+                                eprintln!("sync_gui: got (UNHANDLED) {unhandled:?}");
+                            }
+                            None => {
+                                // eprintln!("to_app_recv: got None...");
+                                // nothing to do
+                            }
+                        }
                     }
-                } // NOTE: end BLEState::Connected
-            }
 
-            // The central panel the region left after adding TopPanel's and SidePanel's
-            // ui.heading("egui_btle_example");
+                    BLEState::Connectable => {
+                        ui.horizontal(|ui| {
+                            if ui.button(format!("Rescan")).clicked() {
+                                self.ble_state = BLEState::Scanning;
+                                self.bridge.send_to_async(AsyncMsg::ScanStart {
+                                    filter: self.filter.clone(),
+                                    duration: self.scan_duration.as_secs_f32(),
+                                });
+                            }
+                            let filter_label = ui.label("Filter: ");
+                            ui.text_edit_singleline(&mut self.filter)
+                                .labelled_by(filter_label.id);
+                        });
 
-            // ui.horizontal(|ui| {
-            //     ui.label("Write something: ");
-            //     ui.text_edit_singleline(&mut self.label);
-            // });
+                        ui.label(format!("Choose a peripheral to connect..."));
+                        for (ix, p) in &self.props_vec {
+                            let pdesc = periph_desc_string(&p);
+                            if !pdesc.contains(self.filter.as_str()) {
+                                continue;
+                            }
+                            if ui
+                                .button(format!("Connect: {}", periph_desc_string(&p)))
+                                .clicked()
+                            {
+                                self.bridge.send_to_async(AsyncMsg::ConnectStart {
+                                    index: *ix,
+                                    props: p.clone(),
+                                });
+                                self.ble_state = BLEState::Connecting;
+                                break;
+                            };
+                        }
+                    }
 
-            // ui.add(egui::Slider::new(&mut self.value, 0.0..=10.0).text("value"));
-            // if ui.button("Increment").clicked() {
-            //     self.value += 1.0;
-            // }
+                    BLEState::Connecting => {
+                        ui.label("Connecting...");
+                        if ui.button(format!("Rescan")).clicked() {
+                            self.ble_state = BLEState::Scanning;
+                            self.bridge.send_to_async(AsyncMsg::ScanStart {
+                                filter: "".into(),
+                                duration: 5.0,
+                            });
+                        }
 
-            ui.separator();
+                        match self.bridge.try_recv_from_async() {
+                            Some(AsyncMsg::ConnectResult {
+                                result,
+                                index,
+                                props,
+                            }) => {
+                                match result {
+                                    ResultSuccess => {
+                                        println!("sync_gui: connected");
+                                    }
+                                    _ => {
+                                        println!("sync_gui: got {result:?}");
+                                        self.ble_state = BLEState::Disconnected;
+                                    }
+                                }
+                                // we can't do much until the services are discovered, so just chill
+                                // here for now?
+                            }
+                            Some(AsyncMsg::Characteristics { chars }) => {
+                                println!("sync_gui: received ({}) chars", chars.len());
+                                self.chars = chars.clone();
+                                self.ble_state = BLEState::Connected;
 
-            // ui.add(egui::github_link_file!(
-            //     "https://github.com/emilk/eframe_template/blob/main/",
-            //     "Source code."
-            // ));
+                                (self.svc_keys, self.svc_map) = sort_svcs_chars(chars.clone());
 
-        }); // NOTE: end: egui::ScrollArea::vertical().show(ui, |ui| ...
+                                // construct a sorted tree repr of [services --> chars] exactly (1) time so the display is consistent
+                                for svc_uuid in self.svc_keys.clone() {
+                                    ui.collapsing(format!("Service: {svc_uuid:?}"), |ui| {
+                                        let cvec = self
+                                            .svc_map
+                                            .get(&svc_uuid)
+                                            .expect("Key error in svc_map");
+                                        for c in cvec {
+                                            ui.label(format!("    {c:?}"));
+                                        }
+                                    });
+                                }
+                            }
+                            Some(unhandled) => {
+                                println!("sync_gui: got (UNHANDLED) msg: {unhandled:?}");
+                            }
+                            None => {}
+                        }
+                    }
+                    BLEState::Connected => {
+                        if ui.button(format!("Disconnect")).clicked() {
+                            self.ble_state = BLEState::Disconnected;
+                            self.bridge.send_to_async(AsyncMsg::DisconnectStart {
+                                index: self.connected_index,
+                                props: self.connected_props.clone(),
+                            });
+                        }
+
+                        // TODO: receiving values like this could be done outside this nested logic...
+                        // TODO: move this logic to a common helper function
+                        match self.bridge.try_recv_from_async() {
+                            Some(AsyncMsg::Payload { payload, char, op }) => {
+                                if let Some(_some_waiting_payload) = self.waiting_payload.clone() {
+                                    // TODO: check the char+op agains self.waiting_payload
+                                    self.waiting_payload = None;
+                                    self.char_values.insert(char.uuid, payload);
+                                }
+                            }
+                            Some(unhandled) => {
+                                eprintln!("sync_gui: got (UNHANDLED) msg: {unhandled:?}");
+                            }
+                            None => (),
+                        }
+
+                        let svc_uuid_vec = self.svc_keys.clone();
+                        for svc_uuid in svc_uuid_vec {
+                            ui.collapsing(format!("Service: {svc_uuid:?}"), |ui| {
+                                let char_vec = self
+                                    .svc_map
+                                    .get(&svc_uuid)
+                                    .expect("trying to get value from svc map");
+                                for c in char_vec {
+                                    ui.label(format!("{} : {:?}", c.uuid, c.properties));
+                                    if c.properties.contains(CharPropFlags::READ) {
+                                        if ui.button("Read").clicked() {
+                                            let m = AsyncMsg::Payload {
+                                                payload: vec![],
+                                                char: c.clone(),
+                                                op: BLEOperation::Read,
+                                            };
+
+                                            self.waiting_payload = Some(m.clone());
+                                            self.bridge.send_to_async(m);
+                                        }
+                                        if self.char_values.contains_key(&c.uuid) {
+                                            ui.label(format!(
+                                                "Read value: {:?}",
+                                                self.char_values.get(&c.uuid).unwrap(),
+                                            ));
+                                        }
+
+                                        // if self.char_values.keys().contains(c.uuid) {
+                                        //     // heyo!
+                                        // }
+                                    }
+                                }
+                            });
+                        }
+                    } // NOTE: end BLEState::Connected
+                }
+                ui.separator();
+            }); // NOTE: end: egui::ScrollArea::vertical().show(ui, |ui| ...
         }); // NOTE: end: egui::CentralPanel::default().show(ctx, |ui| ...
 
-        egui::TopBottomPanel::bottom("bottom_paenl").show(ctx, |ui| {
+        egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 powered_by_egui_and_eframe(ui);
                 egui::warn_if_debug_build(ui);
             });
         });
- 
+
         // repaint often, but sleep a bit...
         std::thread::sleep(Duration::from_millis(5));
         ctx.request_repaint();
