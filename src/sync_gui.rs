@@ -306,6 +306,7 @@ impl eframe::App for GuiApp {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
+        egui::ScrollArea::vertical().show(ui, |ui| {
             // println!(
             //     "DBG: to_app_recv.is_channel_closed() = {}",
             //     self.to_app_recv.is_closed()
@@ -462,12 +463,16 @@ impl eframe::App for GuiApp {
             //     "Source code."
             // ));
 
+        }); // NOTE: end: egui::ScrollArea::vertical().show(ui, |ui| ...
+        }); // NOTE: end: egui::CentralPanel::default().show(ctx, |ui| ...
+
+        egui::TopBottomPanel::bottom("bottom_paenl").show(ctx, |ui| {
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 powered_by_egui_and_eframe(ui);
                 egui::warn_if_debug_build(ui);
             });
         });
-
+ 
         // repaint often, but sleep a bit...
         std::thread::sleep(Duration::from_millis(5));
         ctx.request_repaint();

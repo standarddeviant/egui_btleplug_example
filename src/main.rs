@@ -37,10 +37,7 @@ fn main() {
     );
 }
 
-fn test_old_main() {
-    // TODO: replace test logic w/ gui.rs
-    //       i.e. - put async_bridge logic, etc.
-
+fn _test_async_bridge() {
     // make our async bridge
     let mut ts = AsyncBridge::new();
 
@@ -73,5 +70,5 @@ fn test_old_main() {
         }
     }
 
-    println!("Done with main");
+    println!("Done with AsyncBridge test");
 }
