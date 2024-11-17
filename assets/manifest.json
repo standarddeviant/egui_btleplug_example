@@ -1,6 +1,6 @@
 {
-  "name": "egui Template PWA",
-  "short_name": "egui-template-pwa",
+  "name": "egui_btleplug_example PWA",
+  "short_name": "egui-btleplug-example-pwa",
   "icons": [
     {
       "src": "./icon-256.png",

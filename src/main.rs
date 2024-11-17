@@ -28,8 +28,8 @@ fn main() {
             ),
         ..Default::default()
     };
-    let eframe_result = eframe::run_native(
-        "eframe template",
+    let _eframe_result = eframe::run_native(
+        "egui_btleplug_example",
         native_options,
         Box::new(|cc| {
             Ok(Box::new(GuiApp::new(cc))) // creation context

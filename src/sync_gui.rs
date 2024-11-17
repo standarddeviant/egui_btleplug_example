@@ -213,7 +213,9 @@ impl GuiApp {
             connected_props: PeripheralProperties::default(),
             chars: BTreeSet::new(),
             svc_keys: vec![],
-            svc_map: HashMap::<Uuid, Vec<Characteristic>, RandomState>::from_iter(std::iter::empty()),
+            svc_map: HashMap::<Uuid, Vec<Characteristic>, RandomState>::from_iter(
+                std::iter::empty(),
+            ),
             scan_start_time: Instant::now(),
             scan_duration: Duration::from_secs_f32(5.0),
             bridge: AsyncBridge::new(),
@@ -241,11 +243,12 @@ fn periph_desc_string(props: &PeripheralProperties) -> String {
     out.join(" : ")
 }
 
-
-fn sort_svcs_chars(chars: BTreeSet<Characteristic>) -> (Vec<Uuid>, HashMap<Uuid, Vec<Characteristic>, RandomState>) {
-    let svc_uuid_set: std::collections::HashSet<Uuid, egui::ahash::RandomState> = 
-        HashSet::from_iter(chars.clone().iter().map(|c|c.service_uuid));
-    let mut svc_uuid_vec: Vec<Uuid> = Vec::from_iter(svc_uuid_set.iter().map(|r|r.clone()));
+fn sort_svcs_chars(
+    chars: BTreeSet<Characteristic>,
+) -> (Vec<Uuid>, HashMap<Uuid, Vec<Characteristic>, RandomState>) {
+    let svc_uuid_set: std::collections::HashSet<Uuid, egui::ahash::RandomState> =
+        HashSet::from_iter(chars.clone().iter().map(|c| c.service_uuid));
+    let mut svc_uuid_vec: Vec<Uuid> = Vec::from_iter(svc_uuid_set.iter().map(|r| r.clone()));
     // INFO: making the output type not use references is helpful to not worry about lifetimes in structs...
     // INFO: so we make a vector of reference clones for convenience
     // let svc_uuid_vec: Vec<Uuid> = Vec::from_iter(svc_uuid_set.iter());
@@ -255,14 +258,14 @@ fn sort_svcs_chars(chars: BTreeSet<Characteristic>) -> (Vec<Uuid>, HashMap<Uuid,
     // INFO: so we make a vector of reference clones for convenience
     let tmpchars: Vec<Characteristic> = chars.into_iter().map(|f| f.clone()).collect();
 
-    let mut svc_map: HashMap<Uuid, Vec<Characteristic>, RandomState> = 
+    let mut svc_map: HashMap<Uuid, Vec<Characteristic>, RandomState> =
         HashMap::<Uuid, Vec<Characteristic>, RandomState>::new();
     for svc_uuid in svc_uuid_vec.clone() {
-        let mut tmpvec: Vec<Characteristic> = 
-            tmpchars.clone()
+        let mut tmpvec: Vec<Characteristic> = tmpchars
+            .clone()
             .iter()
-            .map(|r|r.clone())
-            .filter(|c| c.service_uuid==svc_uuid)
+            .map(|r| r.clone())
+            .filter(|c| c.service_uuid == svc_uuid)
             .collect();
         tmpvec.sort();
         svc_map.insert(svc_uuid, tmpvec);
@@ -400,18 +403,15 @@ impl eframe::App for GuiApp {
 
                             // construct a sorted tree repr of [services --> chars] exactly (1) time so the display is consistent
                             for svc_uuid in self.svc_keys.clone() {
-                                ui.collapsing(
-                                    format!("Service: {svc_uuid:?}"),
-                                    |ui| {
-                                        let cvec = self.svc_map.get(&svc_uuid)
-                                            .expect("Key error in svc_map");
-                                        for c in cvec {
-                                            ui.label(format!("    {c:?}"));
-                                        }
+                                ui.collapsing(format!("Service: {svc_uuid:?}"), |ui| {
+                                    let cvec =
+                                        self.svc_map.get(&svc_uuid).expect("Key error in svc_map");
+                                    for c in cvec {
+                                        ui.label(format!("    {c:?}"));
                                     }
-                                );
+                                });
                             }
-                       }
+                        }
                         Some(unhandled) => {
                             println!("sync_gui: got (UNHANDLED) msg: {unhandled:?}");
                         }
@@ -429,23 +429,21 @@ impl eframe::App for GuiApp {
 
                     let svc_uuid_vec = self.svc_keys.clone();
                     for svc_uuid in svc_uuid_vec {
-                        ui.collapsing(
-                            format!("Service: {svc_uuid:?}"),
-                            |ui| {
-                                ui.label("Chars");
-                                let char_vec = self.svc_map.get(&svc_uuid)
-                                    .expect("trying to get value from svc map");
-                                for c in char_vec {
-                                    ui.label(format!("    {c:?}"));
-                                }
+                        ui.collapsing(format!("Service: {svc_uuid:?}"), |ui| {
+                            let char_vec = self
+                                .svc_map
+                                .get(&svc_uuid)
+                                .expect("trying to get value from svc map");
+                            for c in char_vec {
+                                ui.label(format!("{} : {:?}", c.uuid, c.properties));
                             }
-                        );
+                        });
                     }
                 } // NOTE: end BLEState::Connected
             }
 
             // The central panel the region left after adding TopPanel's and SidePanel's
-            ui.heading("eframe template");
+            // ui.heading("egui_btle_example");
 
             // ui.horizontal(|ui| {
             //     ui.label("Write something: ");
@@ -459,10 +457,10 @@ impl eframe::App for GuiApp {
 
             ui.separator();
 
-            ui.add(egui::github_link_file!(
-                "https://github.com/emilk/eframe_template/blob/main/",
-                "Source code."
-            ));
+            // ui.add(egui::github_link_file!(
+            //     "https://github.com/emilk/eframe_template/blob/main/",
+            //     "Source code."
+            // ));
 
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 powered_by_egui_and_eframe(ui);
