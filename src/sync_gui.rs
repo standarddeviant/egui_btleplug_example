@@ -5,11 +5,17 @@ use crate::async_bridge::AsyncBridge;
 
 use btleplug::api::{Characteristic, PeripheralProperties};
 use eframe;
+use egui::ahash::HashSet;
+// use egui::ahash::RandomState;
+use std::collections::hash_map::RandomState;
 // use egui_extras::{Column, TableBuilder};
 use serde::{Deserialize, Serialize};
 
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
+
+use uuid::Uuid;
 
 enum BLEState {
     Disconnected,
@@ -88,6 +94,9 @@ pub struct GuiApp {
 
     // #[serde(skip)] // This how you opt-out of serialization of a field
     chars: BTreeSet<Characteristic>,
+
+    svc_keys: Vec<Uuid>,
+    svc_map: HashMap<Uuid, Vec<Characteristic>, RandomState>,
 
     // let (to_dev_tx, to_dev_rx) = tokio::sync::mpsc::new(32);
     // let (from_dev_tx, from_dev_rx) = tokio::sync::mpsc::new(32);
@@ -203,6 +212,10 @@ impl GuiApp {
             connected_index: 1_000_000,
             connected_props: PeripheralProperties::default(),
             chars: BTreeSet::new(),
+            svc_keys: vec![],
+            svc_map: HashMap::<Uuid, Vec<Characteristic>, RandomState>::from_iter(
+                std::iter::empty(),
+            ),
             scan_start_time: Instant::now(),
             scan_duration: Duration::from_secs_f32(5.0),
             bridge: AsyncBridge::new(),
@@ -228,6 +241,37 @@ fn periph_desc_string(props: &PeripheralProperties) -> String {
     }
 
     out.join(" : ")
+}
+
+fn sort_svcs_chars(
+    chars: BTreeSet<Characteristic>,
+) -> (Vec<Uuid>, HashMap<Uuid, Vec<Characteristic>, RandomState>) {
+    let svc_uuid_set: std::collections::HashSet<Uuid, egui::ahash::RandomState> =
+        HashSet::from_iter(chars.clone().iter().map(|c| c.service_uuid));
+    let mut svc_uuid_vec: Vec<Uuid> = Vec::from_iter(svc_uuid_set.iter().map(|r| r.clone()));
+    // INFO: making the output type not use references is helpful to not worry about lifetimes in structs...
+    // INFO: so we make a vector of reference clones for convenience
+    // let svc_uuid_vec: Vec<Uuid> = Vec::from_iter(svc_uuid_set.iter());
+    svc_uuid_vec.sort();
+
+    // INFO: making the output type not use references is helpful to not worry about lifetimes in structs...
+    // INFO: so we make a vector of reference clones for convenience
+    let tmpchars: Vec<Characteristic> = chars.into_iter().map(|f| f.clone()).collect();
+
+    let mut svc_map: HashMap<Uuid, Vec<Characteristic>, RandomState> =
+        HashMap::<Uuid, Vec<Characteristic>, RandomState>::new();
+    for svc_uuid in svc_uuid_vec.clone() {
+        let mut tmpvec: Vec<Characteristic> = tmpchars
+            .clone()
+            .iter()
+            .map(|r| r.clone())
+            .filter(|c| c.service_uuid == svc_uuid)
+            .collect();
+        tmpvec.sort();
+        svc_map.insert(svc_uuid, tmpvec);
+    }
+
+    (svc_uuid_vec, svc_map)
 }
 
 impl eframe::App for GuiApp {
@@ -262,6 +306,7 @@ impl eframe::App for GuiApp {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
+        egui::ScrollArea::vertical().show(ui, |ui| {
             // println!(
             //     "DBG: to_app_recv.is_channel_closed() = {}",
             //     self.to_app_recv.is_closed()
@@ -285,17 +330,8 @@ impl eframe::App for GuiApp {
                     match self.bridge.try_recv_from_async() {
                         Some(AsyncMsg::ScanResult { result, props_vec }) => {
                             println!("sync_gui: got ScanResult ({result:?})");
-                            // println!("    {periphs:?}");
                             self.props_vec = props_vec;
                             self.ble_state = BLEState::Connectable;
-                            // self.bridge.send_to_async(AsyncMsg::ConnectStart {
-                            //     ???
-                            // });
-                            // self.bridge.send_to_async(AsyncMsg::MsgVersion {
-                            //     major: 1,
-                            //     minor: 2,
-                            //     patch: 3,
-                            // });
                         }
                         Some(unhandled) => {
                             eprintln!("sync_gui: got (UNHANDLED) {unhandled:?}");
@@ -315,7 +351,7 @@ impl eframe::App for GuiApp {
                             duration: 5.0,
                         });
                     }
-                    ui.label(format!("Choose a peripheral to connect...")); // time is {:#?} seconds", since as u32));
+                    ui.label(format!("Choose a peripheral to connect..."));
                     for (ix, p) in &self.props_vec {
                         if ui
                             .button(format!("Connect: {}", periph_desc_string(&p)))
@@ -361,8 +397,21 @@ impl eframe::App for GuiApp {
                         }
                         Some(AsyncMsg::Characteristics { chars }) => {
                             println!("sync_gui: received ({}) chars", chars.len());
-                            self.chars = chars;
+                            self.chars = chars.clone();
                             self.ble_state = BLEState::Connected;
+
+                            (self.svc_keys, self.svc_map) = sort_svcs_chars(chars.clone());
+
+                            // construct a sorted tree repr of [services --> chars] exactly (1) time so the display is consistent
+                            for svc_uuid in self.svc_keys.clone() {
+                                ui.collapsing(format!("Service: {svc_uuid:?}"), |ui| {
+                                    let cvec =
+                                        self.svc_map.get(&svc_uuid).expect("Key error in svc_map");
+                                    for c in cvec {
+                                        ui.label(format!("    {c:?}"));
+                                    }
+                                });
+                            }
                         }
                         Some(unhandled) => {
                             println!("sync_gui: got (UNHANDLED) msg: {unhandled:?}");
@@ -379,15 +428,23 @@ impl eframe::App for GuiApp {
                         });
                     }
 
-                    for c in &self.chars {
-                        ui.label(format!("{c:?}"));
+                    let svc_uuid_vec = self.svc_keys.clone();
+                    for svc_uuid in svc_uuid_vec {
+                        ui.collapsing(format!("Service: {svc_uuid:?}"), |ui| {
+                            let char_vec = self
+                                .svc_map
+                                .get(&svc_uuid)
+                                .expect("trying to get value from svc map");
+                            for c in char_vec {
+                                ui.label(format!("{} : {:?}", c.uuid, c.properties));
+                            }
+                        });
                     }
-                    ui.label(format!("Connected, discovering services..."));
-                }
-            };
+                } // NOTE: end BLEState::Connected
+            }
 
             // The central panel the region left after adding TopPanel's and SidePanel's
-            ui.heading("eframe template");
+            // ui.heading("egui_btle_example");
 
             // ui.horizontal(|ui| {
             //     ui.label("Write something: ");
@@ -401,17 +458,21 @@ impl eframe::App for GuiApp {
 
             ui.separator();
 
-            ui.add(egui::github_link_file!(
-                "https://github.com/emilk/eframe_template/blob/main/",
-                "Source code."
-            ));
+            // ui.add(egui::github_link_file!(
+            //     "https://github.com/emilk/eframe_template/blob/main/",
+            //     "Source code."
+            // ));
 
+        }); // NOTE: end: egui::ScrollArea::vertical().show(ui, |ui| ...
+        }); // NOTE: end: egui::CentralPanel::default().show(ctx, |ui| ...
+
+        egui::TopBottomPanel::bottom("bottom_paenl").show(ctx, |ui| {
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 powered_by_egui_and_eframe(ui);
                 egui::warn_if_debug_build(ui);
             });
         });
-
+ 
         // repaint often, but sleep a bit...
         std::thread::sleep(Duration::from_millis(5));
         ctx.request_repaint();

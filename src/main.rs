@@ -28,8 +28,8 @@ fn main() {
             ),
         ..Default::default()
     };
-    let eframe_result = eframe::run_native(
-        "eframe template",
+    let _eframe_result = eframe::run_native(
+        "egui_btleplug_example",
         native_options,
         Box::new(|cc| {
             Ok(Box::new(GuiApp::new(cc))) // creation context
@@ -37,10 +37,7 @@ fn main() {
     );
 }
 
-fn test_old_main() {
-    // TODO: replace test logic w/ gui.rs
-    //       i.e. - put async_bridge logic, etc.
-
+fn _test_async_bridge() {
     // make our async bridge
     let mut ts = AsyncBridge::new();
 
@@ -73,5 +70,5 @@ fn test_old_main() {
         }
     }
 
-    println!("Done with main");
+    println!("Done with AsyncBridge test");
 }
