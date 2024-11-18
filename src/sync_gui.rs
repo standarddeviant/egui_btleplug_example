@@ -175,59 +175,6 @@ async fn test_transport_fn(
     }
 }
 
-impl GuiApp {
-    /// Called once before the first frame.
-    pub fn new(
-        cc: &eframe::CreationContext<'_>,
-        // to_ble_send: tokio::sync::mpsc::Sender<ProbleMsg>,
-        // to_app_recv: tokio::sync::mpsc::Receiver<ProbleMsg>,
-    ) -> Self {
-        // This is also where you can customize the look and feel of egui using
-        // `cc.egui_ctx.set_visuals` and `cc.egui_ctx.set_fonts`.
-
-        // Load previous app state (if any).
-        // Note that you must enable the `persistence` feature for this to work.
-
-        // let (to_ble_send, to_ble_recv) = tokio::sync::mpsc::channel(32);
-        // let (to_app_send, to_app_recv) = tokio::sync::mpsc::channel(32);
-
-        // if let Some(storage) = cc.storage {
-        //     return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
-        // }
-
-        // spawn a tokio runtime/btleplug task
-        // std::thread::spawn(move || {
-        //     let rt: Runtime = Builder::new_current_thread().enable_all().build().unwrap();
-        //     rt.block_on(async move {
-        //         test_transport_fn(to_app_send, to_ble_recv).await;
-        //     });
-        // });
-
-        // let (junk_send, _) = tokio::sync::mpsc::channel(32);
-        // let (_, junk_recv) = std::sync::mpsc::channel();
-
-        // Default::default()
-        GuiApp {
-            ble_state: BLEState::Disconnected,
-            filter: "".into(),
-            props_vec: vec![],
-            connected_index: 1_000_000,
-            connected_props: PeripheralProperties::default(),
-            chars: BTreeSet::new(),
-            svc_keys: vec![],
-            svc_map: HashMap::<Uuid, Vec<Characteristic>, RandomState>::from_iter(
-                std::iter::empty(),
-            ),
-            waiting_payload: None,
-            char_values: HashMap::<Uuid, Vec<u8>, RandomState>::from_iter(std::iter::empty()),
-            scan_start_time: Instant::now(),
-            scan_duration: Duration::from_secs_f32(5.0),
-            bridge: AsyncBridge::new(),
-            // rt_handle: rt.handle().clone(),
-        }
-    }
-}
-
 fn periph_desc_string(props: &PeripheralProperties) -> String {
     let mut out: Vec<String> = vec![];
     if let Some(name) = &props.local_name {
@@ -278,18 +225,34 @@ fn sort_svcs_chars(
     (svc_uuid_vec, svc_map)
 }
 
-impl eframe::App for GuiApp {
-    /// Called by the frame work to save state before shutdown.
-    // fn save(&mut self, storage: &mut dyn eframe::Storage) {
-    //     eframe::set_value(storage, eframe::APP_KEY, self);
-    // }
+impl GuiApp {
+    /// Called once before the first frame.
+    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        // This is also where you can customize the look and feel of egui using
+        // `cc.egui_ctx.set_visuals` and `cc.egui_ctx.set_fonts`.
 
-    /// Called each time the UI needs repainting, which may be many times per second.
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // ctx.request_repaint();
-        // Put your widgets into a `SidePanel`, `TopBottomPanel`, `CentralPanel`, `Window` or `Area`.
-        // For inspiration and more examples, go to https://emilk.github.io/egui
+        // Default::default()
+        GuiApp {
+            ble_state: BLEState::Disconnected,
+            filter: "".into(),
+            props_vec: vec![],
+            connected_index: 1_000_000,
+            connected_props: PeripheralProperties::default(),
+            chars: BTreeSet::new(),
+            svc_keys: vec![],
+            svc_map: HashMap::<Uuid, Vec<Characteristic>, RandomState>::from_iter(
+                std::iter::empty(),
+            ),
+            waiting_payload: None,
+            char_values: HashMap::<Uuid, Vec<u8>, RandomState>::from_iter(std::iter::empty()),
+            scan_start_time: Instant::now(),
+            scan_duration: Duration::from_secs_f32(5.0),
+            bridge: AsyncBridge::new(),
+            // rt_handle: rt.handle().clone(),
+        }
+    }
 
+    pub fn draw_top_panel(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // The top panel is often a good place for a menu bar:
 
@@ -308,7 +271,9 @@ impl eframe::App for GuiApp {
                 egui::widgets::global_theme_preference_buttons(ui);
             });
         });
+    } // NOTE: end: draw_top_panel
 
+    pub fn draw_central_panel(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 match self.ble_state {
@@ -502,6 +467,24 @@ impl eframe::App for GuiApp {
                 ui.separator();
             }); // NOTE: end: egui::ScrollArea::vertical().show(ui, |ui| ...
         }); // NOTE: end: egui::CentralPanel::default().show(ctx, |ui| ...
+    } // NOTE: end: pub fn draw_central_panel(&mut self, ctx: &egui::Context)
+} // NOTE: end: impl GuiApp
+
+impl eframe::App for GuiApp {
+    /// Called by the frame work to save state before shutdown.
+    // fn save(&mut self, storage: &mut dyn eframe::Storage) {
+    //     eframe::set_value(storage, eframe::APP_KEY, self);
+    // }
+
+    /// Called each time the UI needs repainting, which may be many times per second.
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // ctx.request_repaint();
+        // Put your widgets into a `SidePanel`, `TopBottomPanel`, `CentralPanel`, `Window` or `Area`.
+        // For inspiration and more examples, go to https://emilk.github.io/egui
+
+        self.draw_top_panel(ctx);
+
+        self.draw_central_panel(ctx);
 
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
