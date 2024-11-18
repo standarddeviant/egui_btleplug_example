@@ -9,6 +9,8 @@ mod async_ble;
 mod sync_gui;
 use sync_gui::GuiApp;
 
+mod ble_constants;
+
 use std::time::{Duration, Instant};
 
 // sync_gui: {app: egui, async_bridge: ...}

@@ -4,11 +4,14 @@ use crate::async_msg::GenericResult::*;
 
 use crate::async_bridge::AsyncBridge;
 
+use crate::ble_constants::get_default_char_descs;
+
 use btleplug::api::CharPropFlags;
 use btleplug::api::{Characteristic, PeripheralProperties};
 use eframe;
 use egui::ahash::HashSet;
 // use egui::ahash::RandomState;
+use egui_extras::{Column, TableBuilder};
 use std::collections::hash_map::RandomState;
 // use egui_extras::{Column, TableBuilder};
 use serde::{Deserialize, Serialize};
@@ -100,6 +103,8 @@ pub struct GuiApp {
     waiting_payload: Option<AsyncMsg>,
 
     char_values: HashMap<Uuid, Vec<u8>>,
+
+    char_descs: HashMap<Uuid, String>,
 
     // let (to_dev_tx, to_dev_rx) = tokio::sync::mpsc::new(32);
     // let (from_dev_tx, from_dev_rx) = tokio::sync::mpsc::new(32);
@@ -245,6 +250,7 @@ impl GuiApp {
             ),
             waiting_payload: None,
             char_values: HashMap::<Uuid, Vec<u8>, RandomState>::from_iter(std::iter::empty()),
+            char_descs: get_default_char_descs(),
             scan_start_time: Instant::now(),
             scan_duration: Duration::from_secs_f32(5.0),
             bridge: AsyncBridge::new(),
@@ -428,39 +434,8 @@ impl GuiApp {
                             None => (),
                         }
 
-                        let svc_uuid_vec = self.svc_keys.clone();
-                        for svc_uuid in svc_uuid_vec {
-                            ui.collapsing(format!("Service: {svc_uuid:?}"), |ui| {
-                                let char_vec = self
-                                    .svc_map
-                                    .get(&svc_uuid)
-                                    .expect("trying to get value from svc map");
-                                for c in char_vec {
-                                    ui.label(format!("{} : {:?}", c.uuid, c.properties));
-                                    if c.properties.contains(CharPropFlags::READ) {
-                                        if ui.button("Read").clicked() {
-                                            let m = AsyncMsg::Payload {
-                                                payload: vec![],
-                                                char: c.clone(),
-                                                op: BLEOperation::Read,
-                                            };
-
-                                            self.waiting_payload = Some(m.clone());
-                                            self.bridge.send_to_async(m);
-                                        }
-                                        if self.char_values.contains_key(&c.uuid) {
-                                            ui.label(format!(
-                                                "Read value: {:?}",
-                                                self.char_values.get(&c.uuid).unwrap(),
-                                            ));
-                                        }
-
-                                        // if self.char_values.keys().contains(c.uuid) {
-                                        //     // heyo!
-                                        // }
-                                    }
-                                }
-                            });
+                        for svc_uuid in self.svc_keys.clone() {
+                            self.draw_svc_table(ctx, ui, svc_uuid);
                         }
                     } // NOTE: end BLEState::Connected
                 }
@@ -468,6 +443,82 @@ impl GuiApp {
             }); // NOTE: end: egui::ScrollArea::vertical().show(ui, |ui| ...
         }); // NOTE: end: egui::CentralPanel::default().show(ctx, |ui| ...
     } // NOTE: end: pub fn draw_central_panel(&mut self, ctx: &egui::Context)
+
+    pub fn draw_svc_table(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, svc_uuid: Uuid) {
+        ui.collapsing(format!("Service: {svc_uuid:?}"), |ui| {
+            let char_vec = self
+                .svc_map
+                .get(&svc_uuid)
+                .expect("trying to get value from svc map")
+                .clone();
+            egui::Grid::new("some_unique_id")
+                .striped(true)
+                .show(ui, |ui| {
+                    for c in char_vec.clone() {
+                        ui.label(self.get_char_desc(c.uuid.clone()))
+                            .on_hover_ui(|ui| {
+                                ui.label(format!("{}", c.uuid));
+                            });
+                        ui.label(format!("{:?}", c.properties));
+                        if c.properties.contains(CharPropFlags::READ) {
+                            if ui.button("Read").clicked() {
+                                let m = AsyncMsg::Payload {
+                                    payload: vec![],
+                                    char: c.clone(),
+                                    op: BLEOperation::Read,
+                                };
+
+                                self.waiting_payload = Some(m.clone());
+                                self.bridge.send_to_async(m);
+                            }
+                        } else {
+                            ui.label("n/a");
+                        }
+
+                        if self.char_values.contains_key(&c.uuid) {
+                            ui.label(format!(
+                                "Read value: {:?}",
+                                self.get_char_value_desc(c.uuid)
+                            ))
+                            .on_hover_ui(|ui| {
+                                //
+                            });
+                        } else {
+                            ui.label("n/a");
+                        }
+
+                        // end each row
+                        ui.end_row();
+                    }
+                });
+
+            // for c in char_vec {
+            //     ui.label(format!("{} : {:?}", c.uuid, c.properties));
+            // }
+        });
+    } // NOTE: end draw_svc_table
+
+    pub fn get_char_desc(&mut self, u: Uuid) -> String {
+        let default: String = format!("{u}");
+        println!("self.char_descs = {:?}", self.char_descs);
+        println!(
+            "self.char_descs.contains_key({u}) = {}",
+            self.char_descs.contains_key(&u)
+        );
+        self.char_descs.get(&u).unwrap_or(&default).clone()
+    }
+
+    pub fn get_char_value_desc(&mut self, u: Uuid) -> String {
+        match self.char_values.get(&u) {
+            Some(u8_vec) => match String::from_utf8(u8_vec.clone()) {
+                Ok(utf8_str) => utf8_str,
+                Err(_bad) => {
+                    format!("{u8_vec:?}")
+                }
+            },
+            None => "n/a".into(),
+        }
+    }
 } // NOTE: end: impl GuiApp
 
 impl eframe::App for GuiApp {
