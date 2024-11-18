@@ -4,6 +4,8 @@ use crate::async_msg::GenericResult::*;
 
 use crate::async_bridge::AsyncBridge;
 
+use crate::ble_constants::get_default_char_descs;
+
 use btleplug::api::CharPropFlags;
 use btleplug::api::{Characteristic, PeripheralProperties};
 use eframe;
@@ -101,6 +103,8 @@ pub struct GuiApp {
     waiting_payload: Option<AsyncMsg>,
 
     char_values: HashMap<Uuid, Vec<u8>>,
+
+    char_descs: HashMap<Uuid, String>,
 
     // let (to_dev_tx, to_dev_rx) = tokio::sync::mpsc::new(32);
     // let (from_dev_tx, from_dev_rx) = tokio::sync::mpsc::new(32);
@@ -246,6 +250,7 @@ impl GuiApp {
             ),
             waiting_payload: None,
             char_values: HashMap::<Uuid, Vec<u8>, RandomState>::from_iter(std::iter::empty()),
+            char_descs: get_default_char_descs(),
             scan_start_time: Instant::now(),
             scan_duration: Duration::from_secs_f32(5.0),
             bridge: AsyncBridge::new(),
@@ -444,60 +449,60 @@ impl GuiApp {
             let char_vec = self
                 .svc_map
                 .get(&svc_uuid)
-                .expect("trying to get value from svc map");
+                .expect("trying to get value from svc map")
+                .clone();
+            egui::Grid::new("some_unique_id")
+                .striped(true)
+                .show(ui, |ui| {
+                    for c in char_vec.clone() {
+                        ui.label(self.get_char_desc(c.uuid.clone()))
+                            .on_hover_ui(|ui| {
+                                ui.label(format!("{}", c.uuid));
+                            });
+                        ui.label(format!("{:?}", c.properties));
+                        if c.properties.contains(CharPropFlags::READ) {
+                            if ui.button("Read").clicked() {
+                                let m = AsyncMsg::Payload {
+                                    payload: vec![],
+                                    char: c.clone(),
+                                    op: BLEOperation::Read,
+                                };
 
-            // egui::Grid::new("some_unique_id").show(ui, |ui| {
-            //     ui.label("First row, first column");
-            //     ui.label("First row, second column");
-            //     ui.end_row();
-            //
-            //     ui.label("Second row, first column");
-            //     ui.label("Second row, second column");
-            //     ui.label("Second row, third column");
-            //     ui.end_row();
-            //
-            //     ui.horizontal(|ui| { ui.label("Same"); ui.label("cell"); });
-            //     ui.label("Third row, second column");
-            //     ui.end_row();
-            // });
-
-            egui::Grid::new("some_unique_id").show(ui, |ui| {
-                for c in char_vec {
-                    ui.label(format!("{}", c.uuid));
-                    ui.label(format!("{:?}", c.properties));
-                    if c.properties.contains(CharPropFlags::READ) {
-                        if ui.button("Read").clicked() {
-                            let m = AsyncMsg::Payload {
-                                payload: vec![],
-                                char: c.clone(),
-                                op: BLEOperation::Read,
-                            };
-
-                            self.waiting_payload = Some(m.clone());
-                            self.bridge.send_to_async(m);
+                                self.waiting_payload = Some(m.clone());
+                                self.bridge.send_to_async(m);
+                            }
+                        } else {
+                            ui.label("n/a");
                         }
-                    } else {
-                        ui.label("n/a");
-                    }
 
-                    if self.char_values.contains_key(&c.uuid) {
-                        ui.label(format!(
-                            "Read value: {:?}",
-                            self.char_values.get(&c.uuid).unwrap()
-                        ));
-                    } else {
-                        ui.label("n/a");
-                    }
+                        if self.char_values.contains_key(&c.uuid) {
+                            ui.label(format!(
+                                "Read value: {:?}",
+                                self.char_values.get(&c.uuid).unwrap()
+                            ));
+                        } else {
+                            ui.label("n/a");
+                        }
 
-                    // end each row
-                    ui.end_row();
-                }
-            });
+                        // end each row
+                        ui.end_row();
+                    }
+                });
 
             // for c in char_vec {
             //     ui.label(format!("{} : {:?}", c.uuid, c.properties));
             // }
         });
+    } // NOTE: end draw_svc_table
+
+    pub fn get_char_desc(&mut self, u: Uuid) -> String {
+        let default: String = format!("{u}");
+        println!("self.char_descs = {:?}", self.char_descs);
+        println!(
+            "self.char_descs.contains_key({u}) = {}",
+            self.char_descs.contains_key(&u)
+        );
+        self.char_descs.get(&u).unwrap_or(&default).clone()
     }
 } // NOTE: end: impl GuiApp
 
