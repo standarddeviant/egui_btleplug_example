@@ -439,62 +439,65 @@ impl GuiApp {
         }); // NOTE: end: egui::CentralPanel::default().show(ctx, |ui| ...
     } // NOTE: end: pub fn draw_central_panel(&mut self, ctx: &egui::Context)
 
-    // pub fn draw_central_panel(&mut self, ctx: &egui::Context) {
-
-    // pub fn draw_central_panel(&mut self, ctx: &egui::Context) {
-
     pub fn draw_svc_table(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, svc_uuid: Uuid) {
         ui.collapsing(format!("Service: {svc_uuid:?}"), |ui| {
             let char_vec = self
                 .svc_map
                 .get(&svc_uuid)
                 .expect("trying to get value from svc map");
-            for c in char_vec {
-                ui.label(format!("{} : {:?}", c.uuid, c.properties));
-                if c.properties.contains(CharPropFlags::READ) {
-                    if ui.button("Read").clicked() {
-                        let m = AsyncMsg::Payload {
-                            payload: vec![],
-                            char: c.clone(),
-                            op: BLEOperation::Read,
-                        };
 
-                        self.waiting_payload = Some(m.clone());
-                        self.bridge.send_to_async(m);
+            // egui::Grid::new("some_unique_id").show(ui, |ui| {
+            //     ui.label("First row, first column");
+            //     ui.label("First row, second column");
+            //     ui.end_row();
+            //
+            //     ui.label("Second row, first column");
+            //     ui.label("Second row, second column");
+            //     ui.label("Second row, third column");
+            //     ui.end_row();
+            //
+            //     ui.horizontal(|ui| { ui.label("Same"); ui.label("cell"); });
+            //     ui.label("Third row, second column");
+            //     ui.end_row();
+            // });
+
+            egui::Grid::new("some_unique_id").show(ui, |ui| {
+                for c in char_vec {
+                    ui.label(format!("{}", c.uuid));
+                    ui.label(format!("{:?}", c.properties));
+                    if c.properties.contains(CharPropFlags::READ) {
+                        if ui.button("Read").clicked() {
+                            let m = AsyncMsg::Payload {
+                                payload: vec![],
+                                char: c.clone(),
+                                op: BLEOperation::Read,
+                            };
+
+                            self.waiting_payload = Some(m.clone());
+                            self.bridge.send_to_async(m);
+                        }
+                    } else {
+                        ui.label("n/a");
                     }
+
                     if self.char_values.contains_key(&c.uuid) {
                         ui.label(format!(
                             "Read value: {:?}",
-                            self.char_values.get(&c.uuid).unwrap(),
+                            self.char_values.get(&c.uuid).unwrap()
                         ));
+                    } else {
+                        ui.label("n/a");
                     }
-                }
-            }
-        });
 
-        /*
-        let tbl = TableBuilder::new(ui)
-            .column(Column::auto().resizable(true))
-            .column(Column::remainder())
-            .header(20.0, |mut header| {
-                header.col(|ui| {
-                    ui.heading("First column");
-                });
-                header.col(|ui| {
-                    ui.heading("Second column");
-                });
-            })
-            .body(|mut body| {
-                body.row(30.0, |mut row| {
-                    row.col(|ui| {
-                        ui.label("Hello");
-                    });
-                    row.col(|ui| {
-                        ui.button("world!");
-                    });
-                });
+                    // end each row
+                    ui.end_row();
+                }
             });
-        */
+
+            // for c in char_vec {
+            //     ui.label(format!("{} : {:?}", c.uuid, c.properties));
+            // }
+        });
     }
 } // NOTE: end: impl GuiApp
 
