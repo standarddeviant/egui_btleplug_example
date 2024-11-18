@@ -9,6 +9,7 @@ use btleplug::api::{Characteristic, PeripheralProperties};
 use eframe;
 use egui::ahash::HashSet;
 // use egui::ahash::RandomState;
+use egui_extras::{Column, TableBuilder};
 use std::collections::hash_map::RandomState;
 // use egui_extras::{Column, TableBuilder};
 use serde::{Deserialize, Serialize};
@@ -428,39 +429,8 @@ impl GuiApp {
                             None => (),
                         }
 
-                        let svc_uuid_vec = self.svc_keys.clone();
-                        for svc_uuid in svc_uuid_vec {
-                            ui.collapsing(format!("Service: {svc_uuid:?}"), |ui| {
-                                let char_vec = self
-                                    .svc_map
-                                    .get(&svc_uuid)
-                                    .expect("trying to get value from svc map");
-                                for c in char_vec {
-                                    ui.label(format!("{} : {:?}", c.uuid, c.properties));
-                                    if c.properties.contains(CharPropFlags::READ) {
-                                        if ui.button("Read").clicked() {
-                                            let m = AsyncMsg::Payload {
-                                                payload: vec![],
-                                                char: c.clone(),
-                                                op: BLEOperation::Read,
-                                            };
-
-                                            self.waiting_payload = Some(m.clone());
-                                            self.bridge.send_to_async(m);
-                                        }
-                                        if self.char_values.contains_key(&c.uuid) {
-                                            ui.label(format!(
-                                                "Read value: {:?}",
-                                                self.char_values.get(&c.uuid).unwrap(),
-                                            ));
-                                        }
-
-                                        // if self.char_values.keys().contains(c.uuid) {
-                                        //     // heyo!
-                                        // }
-                                    }
-                                }
-                            });
+                        for svc_uuid in self.svc_keys.clone() {
+                            self.draw_svc_table(ctx, ui, svc_uuid);
                         }
                     } // NOTE: end BLEState::Connected
                 }
@@ -468,6 +438,64 @@ impl GuiApp {
             }); // NOTE: end: egui::ScrollArea::vertical().show(ui, |ui| ...
         }); // NOTE: end: egui::CentralPanel::default().show(ctx, |ui| ...
     } // NOTE: end: pub fn draw_central_panel(&mut self, ctx: &egui::Context)
+
+    // pub fn draw_central_panel(&mut self, ctx: &egui::Context) {
+
+    // pub fn draw_central_panel(&mut self, ctx: &egui::Context) {
+
+    pub fn draw_svc_table(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, svc_uuid: Uuid) {
+        ui.collapsing(format!("Service: {svc_uuid:?}"), |ui| {
+            let char_vec = self
+                .svc_map
+                .get(&svc_uuid)
+                .expect("trying to get value from svc map");
+            for c in char_vec {
+                ui.label(format!("{} : {:?}", c.uuid, c.properties));
+                if c.properties.contains(CharPropFlags::READ) {
+                    if ui.button("Read").clicked() {
+                        let m = AsyncMsg::Payload {
+                            payload: vec![],
+                            char: c.clone(),
+                            op: BLEOperation::Read,
+                        };
+
+                        self.waiting_payload = Some(m.clone());
+                        self.bridge.send_to_async(m);
+                    }
+                    if self.char_values.contains_key(&c.uuid) {
+                        ui.label(format!(
+                            "Read value: {:?}",
+                            self.char_values.get(&c.uuid).unwrap(),
+                        ));
+                    }
+                }
+            }
+        });
+
+        /*
+        let tbl = TableBuilder::new(ui)
+            .column(Column::auto().resizable(true))
+            .column(Column::remainder())
+            .header(20.0, |mut header| {
+                header.col(|ui| {
+                    ui.heading("First column");
+                });
+                header.col(|ui| {
+                    ui.heading("Second column");
+                });
+            })
+            .body(|mut body| {
+                body.row(30.0, |mut row| {
+                    row.col(|ui| {
+                        ui.label("Hello");
+                    });
+                    row.col(|ui| {
+                        ui.button("world!");
+                    });
+                });
+            });
+        */
+    }
 } // NOTE: end: impl GuiApp
 
 impl eframe::App for GuiApp {
