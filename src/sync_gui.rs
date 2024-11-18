@@ -478,8 +478,11 @@ impl GuiApp {
                         if self.char_values.contains_key(&c.uuid) {
                             ui.label(format!(
                                 "Read value: {:?}",
-                                self.char_values.get(&c.uuid).unwrap()
-                            ));
+                                self.get_char_value_desc(c.uuid)
+                            ))
+                            .on_hover_ui(|ui| {
+                                //
+                            });
                         } else {
                             ui.label("n/a");
                         }
@@ -503,6 +506,18 @@ impl GuiApp {
             self.char_descs.contains_key(&u)
         );
         self.char_descs.get(&u).unwrap_or(&default).clone()
+    }
+
+    pub fn get_char_value_desc(&mut self, u: Uuid) -> String {
+        match self.char_values.get(&u) {
+            Some(u8_vec) => match String::from_utf8(u8_vec.clone()) {
+                Ok(utf8_str) => utf8_str,
+                Err(_bad) => {
+                    format!("{u8_vec:?}")
+                }
+            },
+            None => "n/a".into(),
+        }
     }
 } // NOTE: end: impl GuiApp
 
