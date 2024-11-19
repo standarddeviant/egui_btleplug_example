@@ -474,6 +474,32 @@ impl GuiApp {
         });
     }
 
+    pub fn draw_char_buttons(&mut self, ui: &mut egui::Ui, c: Characteristic) {
+        ui.horizontal(|ui| {
+            if c.properties.contains(CharPropFlags::READ) {
+                if ui.button("Read").clicked() {
+                    let m = AsyncMsg::Payload {
+                        payload: vec![],
+                        char: c.clone(),
+                        op: BLEOperation::Read,
+                    };
+                    self.waiting_payload = Some(m.clone());
+                    self.bridge.send_to_async(m);
+                }
+            }
+            if c.properties.contains(CharPropFlags::NOTIFY) {
+                if ui.button("Enale Notifs").clicked() {
+                    let m = AsyncMsg::Payload {
+                        payload: vec![],
+                        char: c.clone(),
+                        op: BLEOperation::EnableNotify,
+                    };
+                    self.waiting_payload = Some(m.clone());
+                    self.bridge.send_to_async(m);
+                }
+            }
+        });
+    }
 
     pub fn draw_svc_table(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, svc_uuid: Uuid) {
         ui.collapsing(format!("Service: {svc_uuid:?}"), |ui| {
@@ -490,23 +516,10 @@ impl GuiApp {
                             .on_hover_ui(|ui| {
                                 ui.label(format!("{}", c.uuid));
                             });
-                        
+
                         ui.label(get_props_desc(c.properties));
 
-                        if c.properties.contains(CharPropFlags::READ) {
-                            if ui.button("Read").clicked() {
-                                let m = AsyncMsg::Payload {
-                                    payload: vec![],
-                                    char: c.clone(),
-                                    op: BLEOperation::Read,
-                                };
-
-                                self.waiting_payload = Some(m.clone());
-                                self.bridge.send_to_async(m);
-                            }
-                        } else {
-                            ui.label("n/a");
-                        }
+                        self.draw_char_buttons(ui, c.clone());
 
                         if self.char_values.contains_key(&c.uuid) {
                             ui.label(format!(

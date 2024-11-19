@@ -175,38 +175,59 @@ pub async fn ble_transport_task(
                 }
             } // NOTE: end: Some(AsyncMsg::ConnectStart { index, props }) => {...}
 
-            Some(AsyncMsg::Payload { payload, char, op }) => {
-                match op {
-                    BLEOperation::Read => {
-                        println!("async_ble: got Payload{{ payload: {payload:?}, char: {char:?}, op: {op:?} }}");
-                        if let Some(ci) = ble.connected_index {
-                            println!("async_ble: await on read...");
-                            match ble.scanned_periphs[ci].read(&char).await {
-                                Ok(rdbuf) => {
-                                    let resp = AsyncMsg::Payload {
-                                        payload: rdbuf,
-                                        char: char.clone(),
-                                        op: crate::async_msg::BLEOperation::EnableIndicate,
-                                    };
-                                    match out_send.send(resp).await {
-                                        Ok(_good) => {}
-                                        Err(_bad) => {
-                                            eprintln!("hmmm... {_bad}");
-                                        }
-                                    };
-                                }
-                                Err(_bad) => {
-                                    eprintln!("hmmm... {_bad}");
-                                }
+            Some(AsyncMsg::Payload { payload, char, op }) => match op {
+                BLEOperation::Read => {
+                    println!("async_ble: acting on Payload{{ payload: {payload:?}, char: {char:?}, op: {op:?} }}");
+                    if let Some(ci) = ble.connected_index {
+                        println!("async_ble: await on read...");
+                        match ble.scanned_periphs[ci].read(&char).await {
+                            Ok(rdbuf) => {
+                                let resp = AsyncMsg::Payload {
+                                    payload: rdbuf,
+                                    char: char.clone(),
+                                    op: crate::async_msg::BLEOperation::EnableIndicate,
+                                };
+                                match out_send.send(resp).await {
+                                    Ok(_good) => {}
+                                    Err(_bad) => {
+                                        eprintln!("hmmm... {_bad}");
+                                    }
+                                };
+                            }
+                            Err(_bad) => {
+                                eprintln!("hmmm... {_bad}");
                             }
                         }
-                        // TODO: handle read...
-                    }
-                    _ => {
-                        println!("ble_async: got (UNHANDLED) Payload{{ payload: {payload:?}, op: {op:?}, char: {char} }}");
                     }
                 }
-            }
+                BLEOperation::EnableNotify => {
+                    println!("async_ble: acting on Payload{{ payload: {payload:?}, char: {char:?}, op: {op:?} }}");
+                    if let Some(ci) = ble.connected_index {
+                        println!("(TODO) Subscribing to characteristic {:?}", char.uuid);
+
+                        ble.scanned_periphs[ci].subscribe(&char).await?;
+                        // ble.notif_streams = ble.scanned_periphs[ci].notifications();
+                        // ble.start_notif_watcher();
+
+                        // let mut notification_stream = peripheral.notifications().await?.take(4);
+                        // // Print the first 4 notifications received.
+                        // let mut notification_stream =
+                        //     self.scanned_periphs[ci].subscribe(&char).await?;
+
+                        // peripheral.notifications().await?.take(4);
+                        // Process while the BLE connection is not broken or stopped.
+                        // while let Some(data) = notification_stream.next().await {
+                        //     println!(
+                        //         "Received data from {:?} [{:?}]: {:?}",
+                        //         local_name, data.uuid, data.value
+                        //     );
+                        // }
+                    }
+                }
+                _ => {
+                    println!("ble_async: got (UNHANDLED) Payload{{ payload: {payload:?}, op: {op:?}, char: {char} }}");
+                }
+            },
 
             Some(AsyncMsg::DisconnectStart { index, props }) => {
                 println!("async_ble acting on AsyncMsg::DisconnectStart{{ {index}, {props:?} }}");
