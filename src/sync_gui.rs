@@ -474,6 +474,7 @@ impl GuiApp {
         });
     }
 
+
     pub fn draw_svc_table(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, svc_uuid: Uuid) {
         ui.collapsing(format!("Service: {svc_uuid:?}"), |ui| {
             let char_vec = self
@@ -489,7 +490,9 @@ impl GuiApp {
                             .on_hover_ui(|ui| {
                                 ui.label(format!("{}", c.uuid));
                             });
+                        
                         ui.label(get_props_desc(c.properties));
+
                         if c.properties.contains(CharPropFlags::READ) {
                             if ui.button("Read").clicked() {
                                 let m = AsyncMsg::Payload {
