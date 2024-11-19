@@ -144,6 +144,27 @@ pub struct GuiApp {
 //     }
 // }
 
+fn get_props_desc(flags: CharPropFlags) -> String {
+    let mut out: Vec<String> = vec![];
+    if flags.contains(CharPropFlags::READ) {
+        out.push("Rd".into());
+    }
+    if flags.contains(CharPropFlags::WRITE) {
+        out.push("Wr".into());
+    }
+    if flags.contains(CharPropFlags::WRITE_WITHOUT_RESPONSE) {
+        out.push("Wr(w/o)".into());
+    }
+    if flags.contains(CharPropFlags::NOTIFY) {
+        out.push("Notif".into());
+    }
+    if flags.contains(CharPropFlags::INDICATE) {
+        out.push("Indicate".into());
+    }
+
+    out.join("/")
+}
+
 async fn test_transport_fn(
     to_app_send: tokio::sync::mpsc::Sender<AsyncMsg>,
     mut to_ble_recv: tokio::sync::mpsc::Receiver<AsyncMsg>,
@@ -444,6 +465,15 @@ impl GuiApp {
         }); // NOTE: end: egui::CentralPanel::default().show(ctx, |ui| ...
     } // NOTE: end: pub fn draw_central_panel(&mut self, ctx: &egui::Context)
 
+    pub fn draw_bottom_panel(&mut self, ctx: &egui::Context) {
+        egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
+            ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+                powered_by_egui_and_eframe(ui);
+                egui::warn_if_debug_build(ui);
+            });
+        });
+    }
+
     pub fn draw_svc_table(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, svc_uuid: Uuid) {
         ui.collapsing(format!("Service: {svc_uuid:?}"), |ui| {
             let char_vec = self
@@ -459,7 +489,7 @@ impl GuiApp {
                             .on_hover_ui(|ui| {
                                 ui.label(format!("{}", c.uuid));
                             });
-                        ui.label(format!("{:?}", c.properties));
+                        ui.label(get_props_desc(c.properties));
                         if c.properties.contains(CharPropFlags::READ) {
                             if ui.button("Read").clicked() {
                                 let m = AsyncMsg::Payload {
@@ -500,11 +530,6 @@ impl GuiApp {
 
     pub fn get_char_desc(&mut self, u: Uuid) -> String {
         let default: String = format!("{u}");
-        println!("self.char_descs = {:?}", self.char_descs);
-        println!(
-            "self.char_descs.contains_key({u}) = {}",
-            self.char_descs.contains_key(&u)
-        );
         self.char_descs.get(&u).unwrap_or(&default).clone()
     }
 
@@ -529,20 +554,11 @@ impl eframe::App for GuiApp {
 
     /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // ctx.request_repaint();
-        // Put your widgets into a `SidePanel`, `TopBottomPanel`, `CentralPanel`, `Window` or `Area`.
-        // For inspiration and more examples, go to https://emilk.github.io/egui
-
         self.draw_top_panel(ctx);
 
         self.draw_central_panel(ctx);
 
-        egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                powered_by_egui_and_eframe(ui);
-                egui::warn_if_debug_build(ui);
-            });
-        });
+        self.draw_bottom_panel(ctx);
 
         // repaint often, but sleep a bit...
         std::thread::sleep(Duration::from_millis(5));
