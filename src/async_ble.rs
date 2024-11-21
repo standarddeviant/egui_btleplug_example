@@ -4,11 +4,13 @@
 use crate::async_msg::GenericResult::{ResultSuccess, ResultUnknown};
 use crate::async_msg::{AsyncMsg, BLEOperation};
 
+use btleplug::api::CentralEvent::*;
 use btleplug::api::{Central, Manager, Peripheral as _, PeripheralProperties, ScanFilter};
 use btleplug::platform::Adapter;
 use btleplug::platform::Peripheral;
 // use futures::stream::StreamExt;
 
+use futures::stream::StreamExt;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::time::{timeout, Duration};
 
@@ -82,6 +84,12 @@ pub async fn ble_transport_task(
         connected_index: None,
     };
 
+    let mut central_events = ble
+        .adapter
+        .events()
+        .await
+        .expect("Unable to get central_events stream");
+
     // TODO - organize in helper struct?
 
     // while let Ok(Some(data)) =
@@ -96,205 +104,230 @@ pub async fn ble_transport_task(
 
     loop {
         // let in_recv_fut = timeout(Duration::from_secs_f32(0.5), notification_stream.next());
+
         // match timeout(Duration::from_secs_f32(0.5), in_recv.recv()).await {}
-
-        match timeout(Duration::from_secs_f32(0.5), in_recv.recv()).await {
-            Err(_bad) => {}
-            Ok(None) => {}
-            Ok(Some(AsyncMsg::ScanStart { filter, duration })) => {
-                println!(
-                    "async_ble: acting on ScanStart{{filter: {filter}, duration: {duration}}}"
-                );
-                match ble.adapter.start_scan(ScanFilter::default()).await {
-                    Ok(_good) => {}
-                    Err(_bad) => {
-                        eprintln!("hmmm... {_bad}");
+        tokio::select! {
+            cevt = central_events.next() => {
+                match cevt {
+                    None => {},
+                    Some(DeviceDisconnected(_discon)) => {
+                        println!("TODO: relay disconnect event!!!!!\n{_discon}");
+                        if let Some(ci) = ble.connected_index {
+                            // todo, check props...
+                            let tmp_msg: AsyncMsg = AsyncMsg::DisconnectResult{
+                                result: ResultSuccess,
+                                index: ci,
+                                props: ble.scanned_props[ci].1.clone()
+                            };
+                            let _res = out_send.send(tmp_msg).await;
+                        };
+                    }
+                    Some(unhandled) => {
+                        println!("async_ble: (UNHANDLED) central event: {unhandled:?}");
                     }
                 }
-                tokio::time::sleep(Duration::from_secs_f32(duration)).await;
-                match ble.adapter.stop_scan().await {
-                    Ok(_good) => {}
-                    Err(_bad) => {
-                        eprintln!("hmmm... {_bad}")
-                    }
-                }
-
-                match ble.adapter.peripherals().await {
-                    Ok(periphs) => {
-                        ble.scanned_periphs.clear();
-                        ble.scanned_props.clear();
-                        for (ix, periph) in periphs.clone().iter().enumerate() {
-                            if let Ok(Some(props)) = periph.properties().await {
-                                ble.scanned_props.push((ix, props));
+            },
+            recv = in_recv.recv() => {
+                match recv {
+                    None => {}
+                    Some(AsyncMsg::ScanStart { filter, duration }) => {
+                        println!(
+                            "async_ble: acting on ScanStart{{filter: {filter}, duration: {duration}}}"
+                        );
+                        match ble.adapter.start_scan(ScanFilter::default()).await {
+                            Ok(_good) => {}
+                            Err(_bad) => {
+                                eprintln!("hmmm... {_bad}");
                             }
                         }
-                        ble.scanned_periphs = periphs.clone();
-
-                        // NOTE: hold on to local copy of periphs
-                        // pvec = periphs.clone();
-                        match out_send
-                            .send(AsyncMsg::ScanResult {
-                                result: ResultSuccess,
-                                props_vec: ble.scanned_props.clone(),
-                            })
-                            .await
-                        {
-                            Ok(_good) => (),
-                            Err(_bad) => (),
-                        }
-                    }
-                    Err(_bad) => {}
-                };
-            } // NOTE: end: got AsyncMsg::ScanStart { filter, duration }
-
-            Ok(Some(AsyncMsg::ConnectStart { index, props })) => {
-                println!("async_ble: acting on ConnectStart{{ {index}, {props:?} }}");
-                let mut break_outer: bool = false;
-                for _try in 0..5 {
-                    if let Ok(_good) = ble.scanned_periphs[index].connect().await {
-                        ble.connected_index = Some(index);
-                        match out_send
-                            .send(AsyncMsg::ConnectResult {
-                                result: ResultSuccess,
-                                index,
-                                props: props.clone(),
-                            })
-                            .await
-                        {
-                            Ok(_good) => {
-                                // if we connect succesfully and communicate it, then...
-                                // subscribe to central events (like periph disconnecting)
-                                // ble.scanned_periphs[index].notifications
+                        tokio::time::sleep(Duration::from_secs_f32(duration)).await;
+                        match ble.adapter.stop_scan().await {
+                            Ok(_good) => {}
+                            Err(_bad) => {
+                                eprintln!("hmmm... {_bad}")
                             }
-                            Err(_bad) => {}
                         }
 
-                        for _try2 in 0..5 {
-                            if let Ok(_good) = ble.scanned_periphs[index].discover_services().await
-                            {
+                        match ble.adapter.peripherals().await {
+                            Ok(periphs) => {
+                                ble.scanned_periphs.clear();
+                                ble.scanned_props.clear();
+                                for (ix, periph) in periphs.clone().iter().enumerate() {
+                                    if let Ok(Some(props)) = periph.properties().await {
+                                        ble.scanned_props.push((ix, props));
+                                    }
+                                }
+                                ble.scanned_periphs = periphs.clone();
+
+                                // NOTE: hold on to local copy of periphs
+                                // pvec = periphs.clone();
                                 match out_send
-                                    .send(AsyncMsg::Characteristics {
-                                        chars: ble.scanned_periphs[index].characteristics(),
+                                    .send(AsyncMsg::ScanResult {
+                                        result: ResultSuccess,
+                                        props_vec: ble.scanned_props.clone(),
                                     })
                                     .await
                                 {
                                     Ok(_good) => (),
                                     Err(_bad) => (),
-                                };
-                                break_outer = true;
+                                }
+                            }
+                            Err(_bad) => {}
+                        };
+                    } // NOTE: end: got AsyncMsg::ScanStart { filter, duration }
+
+                    Some(AsyncMsg::ConnectStart { index, props }) => {
+                        println!("async_ble: acting on ConnectStart{{ {index}, {props:?} }}");
+                        let mut break_outer: bool = false;
+                        for _try in 0..5 {
+                            if let Ok(_good) = ble.scanned_periphs[index].connect().await {
+                                ble.connected_index = Some(index);
+                                match out_send
+                                    .send(AsyncMsg::ConnectResult {
+                                        result: ResultSuccess,
+                                        index,
+                                        props: props.clone(),
+                                    })
+                                    .await
+                                {
+                                    Ok(_good) => {
+                                        // if we connect succesfully and communicate it, then...
+                                        // subscribe to central events (like periph disconnecting)
+                                        // ble.scanned_periphs[index].notifications
+                                    }
+                                    Err(_bad) => {}
+                                }
+
+                                for _try2 in 0..5 {
+                                    if let Ok(_good) = ble.scanned_periphs[index].discover_services().await
+                                    {
+                                        match out_send
+                                            .send(AsyncMsg::Characteristics {
+                                                chars: ble.scanned_periphs[index].characteristics(),
+                                            })
+                                            .await
+                                        {
+                                            Ok(_good) => (),
+                                            Err(_bad) => (),
+                                        };
+                                        break_outer = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if break_outer {
                                 break;
                             }
                         }
-                    }
-                    if break_outer {
-                        break;
-                    }
-                }
-            } // NOTE: end: Some(AsyncMsg::ConnectStart { index, props }) => {...}
+                    } // NOTE: end: Some(AsyncMsg::ConnectStart { index, props }) => {...}
 
-            Ok(Some(AsyncMsg::Payload { payload, char, op })) => match op {
-                BLEOperation::Read => {
-                    println!("async_ble: acting on Payload{{ payload: {payload:?}, char: {char:?}, op: {op:?} }}");
-                    if let Some(ci) = ble.connected_index {
-                        println!("async_ble: await on read...");
-                        match ble.scanned_periphs[ci].read(&char).await {
-                            Ok(rdbuf) => {
-                                let resp = AsyncMsg::Payload {
-                                    payload: rdbuf,
-                                    char: char.clone(),
-                                    op: crate::async_msg::BLEOperation::EnableIndicate,
-                                };
-                                match out_send.send(resp).await {
-                                    Ok(_good) => {}
+                    Some(AsyncMsg::Payload { payload, char, op }) => match op {
+                        BLEOperation::Read => {
+                            println!("async_ble: acting on Payload{{ payload: {payload:?}, char: {char:?}, op: {op:?} }}");
+                            if let Some(ci) = ble.connected_index {
+                                println!("async_ble: await on read...");
+                                match ble.scanned_periphs[ci].read(&char).await {
+                                    Ok(rdbuf) => {
+                                        let resp = AsyncMsg::Payload {
+                                            payload: rdbuf,
+                                            char: char.clone(),
+                                            op: crate::async_msg::BLEOperation::EnableIndicate,
+                                        };
+                                        match out_send.send(resp).await {
+                                            Ok(_good) => {}
+                                            Err(_bad) => {
+                                                eprintln!("hmmm... {_bad}");
+                                            }
+                                        };
+                                    }
                                     Err(_bad) => {
                                         eprintln!("hmmm... {_bad}");
                                     }
-                                };
-                            }
-                            Err(_bad) => {
-                                eprintln!("hmmm... {_bad}");
+                                }
                             }
                         }
-                    }
-                }
-                BLEOperation::EnableNotify => {
-                    println!("async_ble: acting on Payload{{ payload: {payload:?}, char: {char:?}, op: {op:?} }}");
-                    if let Some(ci) = ble.connected_index {
-                        println!("(TODO) Subscribing to characteristic {:?}", char.uuid);
+                        BLEOperation::EnableNotify => {
+                            println!("async_ble: acting on Payload{{ payload: {payload:?}, char: {char:?}, op: {op:?} }}");
+                            if let Some(ci) = ble.connected_index {
+                                println!("(TODO) Subscribing to characteristic {:?}", char.uuid);
 
-                        ble.scanned_periphs[ci].subscribe(&char).await?;
-                        // ble.notif_streams = ble.scanned_periphs[ci].notifications();
-                        // ble.start_notif_watcher();
+                                ble.scanned_periphs[ci].subscribe(&char).await?;
+                                // ble.notif_streams = ble.scanned_periphs[ci].notifications();
+                                // ble.start_notif_watcher();
 
-                        // let mut notification_stream = peripheral.notifications().await?.take(4);
-                        // // Print the first 4 notifications received.
-                        // let mut notification_stream =
-                        //     self.scanned_periphs[ci].subscribe(&char).await?;
+                                // let mut notification_stream = peripheral.notifications().await?.take(4);
+                                // // Print the first 4 notifications received.
+                                // let mut notification_stream =
+                                //     self.scanned_periphs[ci].subscribe(&char).await?;
 
-                        // peripheral.notifications().await?.take(4);
-                        // Process while the BLE connection is not broken or stopped.
-                        // while let Some(data) = notification_stream.next().await {
-                        //     println!(
-                        //         "Received data from {:?} [{:?}]: {:?}",
-                        //         local_name, data.uuid, data.value
-                        //     );
-                        // }
-                    }
-                }
-                _ => {
-                    println!("ble_async: got (UNHANDLED) Payload{{ payload: {payload:?}, op: {op:?}, char: {char} }}");
-                }
-            },
+                                // peripheral.notifications().await?.take(4);
+                                // Process while the BLE connection is not broken or stopped.
+                                // while let Some(data) = notification_stream.next().await {
+                                //     println!(
+                                //         "Received data from {:?} [{:?}]: {:?}",
+                                //         local_name, data.uuid, data.value
+                                //     );
+                                // }
+                            }
+                        }
+                        _ => {
+                            println!("ble_async: got (UNHANDLED) Payload{{ payload: {payload:?}, op: {op:?}, char: {char} }}");
+                        }
+                    },
 
-            Ok(Some(AsyncMsg::DisconnectStart { index, props })) => {
-                println!("async_ble acting on AsyncMsg::DisconnectStart{{ {index}, {props:?} }}");
+                    Some(AsyncMsg::DisconnectStart { index, props }) => {
+                        println!("async_ble acting on AsyncMsg::DisconnectStart{{ {index}, {props:?} }}");
 
-                match ble.connected_index {
-                    None => {
-                        // TODO: handle discon req while async_ble is unconnected
-                    }
-                    Some(ci) => {
-                        match ble.scanned_periphs[ci].disconnect().await {
-                            Ok(_good) => {
-                                let res = out_send
-                                    .send(AsyncMsg::DisconnectResult {
-                                        result: ResultSuccess,
-                                        index: ci,
-                                        props: ble.scanned_props[ci].1.clone(),
-                                    })
-                                    .await;
-                                match res {
-                                    Ok(_good) => (),
+                        match ble.connected_index {
+                            None => {
+                                // TODO: handle discon req while async_ble is unconnected
+                            }
+                            Some(ci) => {
+                                match ble.scanned_periphs[ci].disconnect().await {
+                                    Ok(_good) => {
+                                        let res = out_send
+                                            .send(AsyncMsg::DisconnectResult {
+                                                result: ResultSuccess,
+                                                index: ci,
+                                                props: ble.scanned_props[ci].1.clone(),
+                                            })
+                                            .await;
+                                        match res {
+                                            Ok(_good) => (),
+                                            Err(_bad) => (),
+                                        }
+
+                                        // "async_ble got AsyncMsg::DisconnectStart{{ {index}, {props:?} }}"
+                                        // );
+                                    }
                                     Err(_bad) => (),
                                 }
-
-                                // "async_ble got AsyncMsg::DisconnectStart{{ {index}, {props:?} }}"
-                                // );
                             }
-                            Err(_bad) => (),
                         }
-                    }
-                }
-                // ble.connected_periph
-            } // NOTE: end: Some(unhandled)
-            // unwrap().disconnect().await;
-            // if let Some(p) = ble.connected_periph {
-            // match ble.connected_periph.as_mut().unwrap().disconnect().await {
-            //     // unwrap().disconnect().await {
-            //     Ok(_good) => {}
-            //     Err(_bad) => (),
-            // }
-            // }
+                        // ble.connected_periph
+                    } // NOTE: end: Some(unhandled)
 
-            // Some(AsyncMsg::ReadDeviceInfo { filter, duration }) => {
-            //     //
-            // }
+                    // unwrap().disconnect().await;
+                    // if let Some(p) = ble.connected_periph {
+                    // match ble.connected_periph.as_mut().unwrap().disconnect().await {
+                    //     // unwrap().disconnect().await {
+                    //     Ok(_good) => {}
+                    //     Err(_bad) => (),
+                    // }
+                    // }
 
-            // Some(AsyncMsg::Error)
-            // filter, duration }) => {}
-            Ok(Some(unhandled)) => {
-                println!("async_ble got (UNHANDLED): {unhandled:?}");
-            } // NOTE: end: Some(unhandled)
+                    // Some(AsyncMsg::ReadDeviceInfo { filter, duration }) => {
+                    //     //
+                    // }
+
+                    // Some(AsyncMsg::Error)
+                    // filter, duration }) => {}
+                    Some(unhandled) => {
+                        println!("async_ble got (UNHANDLED): {unhandled:?}");
+                    } // NOTE: end: Some(unhandled)
+
+                };
+            }
         }
     }
 }

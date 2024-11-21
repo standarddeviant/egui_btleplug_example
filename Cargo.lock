@@ -950,6 +950,7 @@ dependencies = [
  "eframe",
  "egui",
  "egui_extras",
+ "futures",
  "serde",
  "serde_json",
  "tokio",

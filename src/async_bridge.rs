@@ -47,11 +47,9 @@ impl AsyncBridge {
         let rt = Builder::new_current_thread().enable_all().build().unwrap();
 
         std::thread::spawn(move || {
-            //
             rt.block_on(async move {
                 ble_transport_task(out_send, in_recv).await;
             });
-            // }
         });
 
         AsyncBridge {

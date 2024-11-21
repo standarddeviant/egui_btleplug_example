@@ -454,6 +454,13 @@ impl GuiApp {
                             self.char_values.insert(char.uuid, payload);
                         }
                     }
+                    Some(AsyncMsg::DisconnectResult {
+                        result: _result,
+                        index: _index,
+                        props: _props,
+                    }) => {
+                        self.ble_state = BLEState::Disconnected;
+                    }
                     Some(unhandled) => {
                         eprintln!("sync_gui: got (UNHANDLED) msg: {unhandled:?}");
                     }
