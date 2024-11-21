@@ -10,8 +10,7 @@ use btleplug::platform::Peripheral;
 // use futures::stream::StreamExt;
 
 use tokio::sync::mpsc::{Receiver, Sender};
-use tokio::time::Duration;
-// ::{Sender, Receiver};
+use tokio::time::{timeout, Duration};
 
 struct AsyncBLE {
     adapter: Adapter,
@@ -85,10 +84,24 @@ pub async fn ble_transport_task(
 
     // TODO - organize in helper struct?
 
+    // while let Ok(Some(data)) =
+    //     // WARN: if we wait for 2.5s and don't get a new message, consider the log finished
+    //     // TODO: create a cleaner protocol...
+    //     timeout(
+    //         Duration::from_secs_f32(args.nus_timeout),
+    //         notification_stream.next(),
+    //     )
+    //     .await
+    // {
+
     loop {
-        match in_recv.recv().await {
-            None => {}
-            Some(AsyncMsg::ScanStart { filter, duration }) => {
+        // let in_recv_fut = timeout(Duration::from_secs_f32(0.5), notification_stream.next());
+        // match timeout(Duration::from_secs_f32(0.5), in_recv.recv()).await {}
+
+        match timeout(Duration::from_secs_f32(0.5), in_recv.recv()).await {
+            Err(_bad) => {}
+            Ok(None) => {}
+            Ok(Some(AsyncMsg::ScanStart { filter, duration })) => {
                 println!(
                     "async_ble: acting on ScanStart{{filter: {filter}, duration: {duration}}}"
                 );
@@ -134,7 +147,7 @@ pub async fn ble_transport_task(
                 };
             } // NOTE: end: got AsyncMsg::ScanStart { filter, duration }
 
-            Some(AsyncMsg::ConnectStart { index, props }) => {
+            Ok(Some(AsyncMsg::ConnectStart { index, props })) => {
                 println!("async_ble: acting on ConnectStart{{ {index}, {props:?} }}");
                 let mut break_outer: bool = false;
                 for _try in 0..5 {
@@ -148,7 +161,11 @@ pub async fn ble_transport_task(
                             })
                             .await
                         {
-                            Ok(_good) => {}
+                            Ok(_good) => {
+                                // if we connect succesfully and communicate it, then...
+                                // subscribe to central events (like periph disconnecting)
+                                // ble.scanned_periphs[index].notifications
+                            }
                             Err(_bad) => {}
                         }
 
@@ -175,7 +192,7 @@ pub async fn ble_transport_task(
                 }
             } // NOTE: end: Some(AsyncMsg::ConnectStart { index, props }) => {...}
 
-            Some(AsyncMsg::Payload { payload, char, op }) => match op {
+            Ok(Some(AsyncMsg::Payload { payload, char, op })) => match op {
                 BLEOperation::Read => {
                     println!("async_ble: acting on Payload{{ payload: {payload:?}, char: {char:?}, op: {op:?} }}");
                     if let Some(ci) = ble.connected_index {
@@ -229,7 +246,7 @@ pub async fn ble_transport_task(
                 }
             },
 
-            Some(AsyncMsg::DisconnectStart { index, props }) => {
+            Ok(Some(AsyncMsg::DisconnectStart { index, props })) => {
                 println!("async_ble acting on AsyncMsg::DisconnectStart{{ {index}, {props:?} }}");
 
                 match ble.connected_index {
@@ -275,7 +292,7 @@ pub async fn ble_transport_task(
 
             // Some(AsyncMsg::Error)
             // filter, duration }) => {}
-            Some(unhandled) => {
+            Ok(Some(unhandled)) => {
                 println!("async_ble got (UNHANDLED): {unhandled:?}");
             } // NOTE: end: Some(unhandled)
         }
