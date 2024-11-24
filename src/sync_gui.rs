@@ -473,6 +473,10 @@ impl GuiApp {
                         }) => {
                             self.ble_state = BLEState::Disconnected;
                         }
+                        Some(AsyncMsg::PayloadUuid { payload, uuid, op }) => {
+                            let tmps = format!("[{uuid}]: {payload:?}");
+                            self.notif_text.push_str(tmps.as_str());
+                        }
                         Some(unhandled) => {
                             eprintln!("sync_gui: got (UNHANDLED) msg: {unhandled:?}");
                         }

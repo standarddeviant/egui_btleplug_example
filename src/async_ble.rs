@@ -91,7 +91,7 @@ async fn notif_relay_fn(
             Some(vn) => {
                 // let char = Characteristic::from
                 let msg = AsyncMsg::PayloadUuid {
-                    payload: [].into(),
+                    payload: vn.value.clone(),
                     uuid: vn.uuid,
                     op: BLEOperation::Notify,
                 };
@@ -313,26 +313,12 @@ pub async fn ble_transport_task(
                         BLEOperation::EnableNotify => {
                             println!("async_ble: acting on Payload{{ payload: {payload:?}, char: {char:?}, op: {op:?} }}");
                             if let Some(ci) = ble.connected_index {
-                                println!("(TODO) Subscribing to characteristic {:?}", char.uuid);
-
-                                ble.scanned_periphs[ci].subscribe(&char).await?;
-                                // tokio::spawn(future)
-                                // ble.notif_streams = ble.scanned_periphs[ci].notifications();
-                                // ble.start_notif_watcher();
-
-                                // // Print the first 4 notifications received.
-                                // let mut notification_stream =
-                                //     self.scanned_periphs[ci].subscribe(&char).await?;
-
-                                // peripheral.notifications().await?.take(4);
-                                // Process while the BLE connection is not broken or stopped.
-                                // while let Some(data) = notification_stream.next().await {
-                                //     println!(
-                                //         "Received data from {:?} [{:?}]: {:?}",
-                                //         local_name, data.uuid, data.value
-                                //     );
-                                // }
-                            }
+                                println!("async_ble: subscribing to characteristic {:?}", char.uuid);
+                                match ble.scanned_periphs[ci].subscribe(&char).await {
+                                    Ok(_good) => {},
+                                    Err(_bad) => {},
+                                }
+                           }
                         }
                         _ => {
                             println!("ble_async: got (UNHANDLED) Payload{{ payload: {payload:?}, op: {op:?}, char: {char} }}");
@@ -341,7 +327,6 @@ pub async fn ble_transport_task(
 
                     Some(AsyncMsg::DisconnectStart { index, props }) => {
                         println!("async_ble acting on AsyncMsg::DisconnectStart{{ {index}, {props:?} }}");
-
                         match ble.connected_index {
                             None => {
                                 // TODO: handle discon req while async_ble is unconnected
@@ -357,12 +342,11 @@ pub async fn ble_transport_task(
                                             })
                                             .await;
                                         match res {
-                                            Ok(_good) => (),
+                                            Ok(_good) => {
+                                                ble.notif_relay_handle.abort();
+                                            },
                                             Err(_bad) => (),
                                         }
-
-                                        // "async_ble got AsyncMsg::DisconnectStart{{ {index}, {props:?} }}"
-                                        // );
                                     }
                                     Err(_bad) => (),
                                 }
