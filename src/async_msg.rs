@@ -4,6 +4,7 @@
 use btleplug::api::{Characteristic, PeripheralProperties};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+use uuid::Uuid;
 
 // #[derive(Serialize, Deserialize)]
 // struct Person {
@@ -78,6 +79,11 @@ pub enum AsyncMsg {
     Payload {
         payload: Vec<u8>,
         char: Characteristic,
+        op: BLEOperation,
+    },
+    PayloadUuid {
+        payload: Vec<u8>,
+        uuid: Uuid,
         op: BLEOperation,
     },
 }

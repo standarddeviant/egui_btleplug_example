@@ -4,14 +4,19 @@
 use crate::async_msg::GenericResult::{ResultSuccess, ResultUnknown};
 use crate::async_msg::{AsyncMsg, BLEOperation};
 
-use btleplug::api::CentralEvent::*;
-use btleplug::api::{Central, Manager, Peripheral as _, PeripheralProperties, ScanFilter};
+use btleplug::api::{
+    Central, Manager, Peripheral as _, PeripheralProperties, ScanFilter, ValueNotification,
+};
+use btleplug::api::{CentralEvent::*, Characteristic};
 use btleplug::platform::Adapter;
 use btleplug::platform::Peripheral;
 // use futures::stream::StreamExt;
 
 use futures::stream::StreamExt;
+use tokio::pin;
+use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::task::JoinHandle;
 use tokio::time::{timeout, Duration};
 
 struct AsyncBLE {
@@ -19,6 +24,13 @@ struct AsyncBLE {
     scanned_props: Vec<(usize, PeripheralProperties)>,
     scanned_periphs: Vec<Peripheral>,
     connected_index: Option<usize>,
+    notif_relay_handle: JoinHandle<i32>,
+    // notifs_task_on: bool,
+    // notifs_stream:impl Stream<Item = ValueNotification> ,
+    // Box<dyn Stream<Item = ValueNotification>>,
+    // notifs_stream: Stream<Item = ValueNotification>::new();
+    // Stream<Item = ValueNotification>::new();
+    // dyn stream::Stream<Item = ValueNotification>,
 }
 
 // // this is a pure function; output is a strict function of input
@@ -60,6 +72,42 @@ pub async fn scan_for_peripherals(
     return Ok(adapter.peripherals().await.unwrap());
 }
 
+// async fn notif_watcher(dyn Stream<Item = ValueNotification>) {
+//
+// }
+
+async fn noop() -> i32 {
+    0
+}
+
+async fn notif_relay_fn(
+    notif_stream: impl StreamExt<Item = ValueNotification>,
+    out_send: Sender<AsyncMsg>,
+) -> i32 {
+    futures::pin_mut!(notif_stream); // rust magic...
+
+    loop {
+        match notif_stream.next().await {
+            Some(vn) => {
+                // let char = Characteristic::from
+                let msg = AsyncMsg::PayloadUuid {
+                    payload: [].into(),
+                    uuid: vn.uuid,
+                    op: BLEOperation::Notify,
+                };
+                match out_send.send(msg).await {
+                    _ => (), // FIXME
+                }
+            }
+            None => {
+                println!("yolo?");
+                // what to do here?
+            }
+        }
+    }
+    0
+}
+
 // ble_transport(out_send, in_recv).await;
 pub async fn ble_transport_task(
     out_send: Sender<AsyncMsg>,
@@ -67,6 +115,11 @@ pub async fn ble_transport_task(
 ) -> Result<(), Box<dyn Error>> {
     let manager = btleplug::platform::Manager::new().await?;
     let adapter_list = manager.adapters().await?;
+
+    // to_async: mpsc::Sender<AsyncMsg>,
+    // from_async: mpsc::Receiver<AsyncMsg>,
+    // let (notif_send, mut notif_recv) = mpsc::channel::<AsyncMsg>(16);
+
     if adapter_list.is_empty() {
         eprintln!("No Bluetooth adapters found");
         let _ = out_send
@@ -82,6 +135,7 @@ pub async fn ble_transport_task(
         scanned_props: vec![],
         scanned_periphs: vec![],
         connected_index: None,
+        notif_relay_handle: tokio::task::spawn(noop()),
     };
 
     let mut central_events = ble
@@ -89,6 +143,8 @@ pub async fn ble_transport_task(
         .events()
         .await
         .expect("Unable to get central_events stream");
+
+    // let mut notif_stream = stream
 
     // TODO - organize in helper struct?
 
@@ -104,9 +160,13 @@ pub async fn ble_transport_task(
 
     loop {
         // let in_recv_fut = timeout(Duration::from_secs_f32(0.5), notification_stream.next());
-
+        println!("check...");
         // match timeout(Duration::from_secs_f32(0.5), in_recv.recv()).await {}
         tokio::select! {
+            // notif = notif_recv.recv() => {
+            //     println!("TODO: got notif! {notif:?}");
+            // }
+            // notif = notif_streams.next() => {
             cevt = central_events.next() => {
                 match cevt {
                     None => {},
@@ -191,6 +251,10 @@ pub async fn ble_transport_task(
                                     .await
                                 {
                                     Ok(_good) => {
+                                        let notifs = ble.scanned_periphs[index].notifications().await?;
+                                        let notif_fut = notif_relay_fn(notifs, out_send.clone());
+                                        ble.notif_relay_handle = tokio::task::spawn(notif_fut);
+                                        // let _ = tokio::
                                         // if we connect succesfully and communicate it, then...
                                         // subscribe to central events (like periph disconnecting)
                                         // ble.scanned_periphs[index].notifications
@@ -252,10 +316,10 @@ pub async fn ble_transport_task(
                                 println!("(TODO) Subscribing to characteristic {:?}", char.uuid);
 
                                 ble.scanned_periphs[ci].subscribe(&char).await?;
+                                // tokio::spawn(future)
                                 // ble.notif_streams = ble.scanned_periphs[ci].notifications();
                                 // ble.start_notif_watcher();
 
-                                // let mut notification_stream = peripheral.notifications().await?.take(4);
                                 // // Print the first 4 notifications received.
                                 // let mut notification_stream =
                                 //     self.scanned_periphs[ci].subscribe(&char).await?;

@@ -531,7 +531,7 @@ impl GuiApp {
                 }
             }
             if c.properties.contains(CharPropFlags::NOTIFY) {
-                if ui.button("Enale Notifs").clicked() {
+                if ui.button("Enable Notify").clicked() {
                     let m = AsyncMsg::Payload {
                         payload: vec![],
                         char: c.clone(),
