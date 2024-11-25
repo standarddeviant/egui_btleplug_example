@@ -25,7 +25,7 @@ pub enum GenericResult {
     ResultResourceNotAvailable = 6,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum BLEOperation {
     Unknown = 0,
     Read = 1,

@@ -48,7 +48,7 @@ impl AsyncBridge {
 
         std::thread::spawn(move || {
             rt.block_on(async move {
-                ble_transport_task(out_send, in_recv).await;
+                let _ = ble_transport_task(out_send, in_recv).await;
             });
         });
 

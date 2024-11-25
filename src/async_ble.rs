@@ -95,6 +95,8 @@ async fn notif_relay_fn(
                     uuid: vn.uuid,
                     op: BLEOperation::Notify,
                 };
+                println!("notif_relay_fn: acting on {vn:?}");
+                println!("notif_relay_fn: sending on {msg:?}");
                 match out_send.send(msg).await {
                     _ => (), // FIXME
                 }

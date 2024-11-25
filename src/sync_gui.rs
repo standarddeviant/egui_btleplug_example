@@ -281,7 +281,7 @@ impl GuiApp {
             scan_start_time: Instant::now(),
             scan_duration: Duration::from_secs_f32(5.0),
             bridge: AsyncBridge::new(),
-            notif_text: "n/a".into(), // rt_handle: rt.handle().clone(),
+            notif_text: "".into(), // rt_handle: rt.handle().clone(),
         }
     }
 
@@ -312,7 +312,16 @@ impl GuiApp {
                 self.draw_central_panel_left(ctx, ui);
                 ui.separator();
                 // ui.label(RichText::new("Red text").color(Color32::RED));
-                ui.add(egui::TextEdit::multiline(&mut self.notif_text).interactive(false));
+                ui.with_layout(Layout::top_down(egui::Align::LEFT), |ui| {
+                    ui.label("Notifications");
+                    let font_selection = egui::style::TextStyle::Monospace;
+                    ui.add_sized(
+                        ui.available_size(),
+                        egui::TextEdit::multiline(&mut self.notif_text)
+                            .interactive(false)
+                            .font(font_selection), // egui::FontFamily::Monospace),
+                    );
+                });
                 // ui.text_edit_multiline(&mut self.notif_text)
                 // .interactive(false);
             });
@@ -417,6 +426,7 @@ impl GuiApp {
                                 _ => {
                                     println!("sync_gui: got {result:?}");
                                     self.ble_state = BLEState::Disconnected;
+                                    self.notif_text = "".into();
                                 }
                             }
                             // we can't do much until the services are discovered, so just chill
@@ -450,6 +460,7 @@ impl GuiApp {
                 BLEState::Connected => {
                     if ui.button(format!("Disconnect")).clicked() {
                         self.ble_state = BLEState::Disconnected;
+                        self.notif_text = "".into();
                         self.bridge.send_to_async(AsyncMsg::DisconnectStart {
                             index: self.connected_index,
                             props: self.connected_props.clone(),
@@ -466,16 +477,22 @@ impl GuiApp {
                                 self.char_values.insert(char.uuid, payload);
                             }
                         }
+                        Some(AsyncMsg::PayloadUuid { payload, uuid, op }) => {
+                            println!(
+                                "sync_gui: acting on PayloadUuid{{ {payload:?}, {uuid}, {op:?} }}"
+                            );
+                            if BLEOperation::Notify == op {
+                                let tmps = format!("[{uuid}]: {payload:?}\n");
+                                self.notif_text.push_str(tmps.as_str());
+                            }
+                        }
                         Some(AsyncMsg::DisconnectResult {
                             result: _result,
                             index: _index,
                             props: _props,
                         }) => {
                             self.ble_state = BLEState::Disconnected;
-                        }
-                        Some(AsyncMsg::PayloadUuid { payload, uuid, op }) => {
-                            let tmps = format!("[{uuid}]: {payload:?}");
-                            self.notif_text.push_str(tmps.as_str());
+                            self.notif_text = "".into();
                         }
                         Some(unhandled) => {
                             eprintln!("sync_gui: got (UNHANDLED) msg: {unhandled:?}");
@@ -559,13 +576,14 @@ impl GuiApp {
                 .striped(true)
                 .show(ui, |ui| {
                     for c in char_vec.clone() {
-                        ui.label(self.get_char_desc(c.uuid.clone()))
+                        ui.label(format!("{}", self.get_char_desc(c.uuid.clone())))
                             .on_hover_ui(|ui| {
                                 ui.label(format!("{}", c.uuid));
                             });
 
                         ui.label(get_props_desc(c.properties));
 
+                        ui.end_row();
                         self.draw_char_buttons(ui, c.clone());
 
                         if self.char_values.contains_key(&c.uuid) {
